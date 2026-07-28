@@ -42,8 +42,11 @@ app.use('/api/settings', settingsRouter);
 const webDist = resolve(__dirname, '../../web/dist');
 if (existsSync(webDist)) {
   app.use(express.static(webDist));
+  // Client-side routes fall through to index.html. Requests that look like a
+  // file (anything with an extension) must not, or a missing asset would come
+  // back as HTML with a 200 and hide the problem.
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api/')) {
+    if (req.path.startsWith('/api/') || /\.[a-z0-9]+$/i.test(req.path)) {
       next();
       return;
     }
