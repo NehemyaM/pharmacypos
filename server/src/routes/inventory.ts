@@ -296,5 +296,3 @@ inventoryRouter.get('/out-of-stock', (_req, res) => {
       ORDER BY p.name LIMIT 500`,
   ).all(cm));
 });
-
-export type { Product };

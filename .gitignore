@@ -12,3 +12,5 @@ data/
 coverage/
 web/dist/
 server/dist/
+e2e/screenshots/
+*.tsbuildinfo

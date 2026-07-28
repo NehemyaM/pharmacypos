@@ -268,8 +268,15 @@ function main(): void {
 
         const expiry = addMonths(cm, monthsOut);
         const mrpPaise = Math.round(seed.mrp * 100);
-        const costPaise = Math.round((mrpPaise * seed.costPct) / 100);
-        const packs = randInt(4, 40);
+        // A distributor quotes rate *exclusive* of GST while MRP is inclusive,
+        // so the trade margin applies to the ex-GST value of the MRP. Taking
+        // the percentage off the inclusive MRP would understate — and for
+        // 12%/18% items invert — the shop's real margin.
+        const exGstMrp = (mrpPaise * 100) / (100 + seed.gst);
+        const costPaise = Math.round((exGstMrp * seed.costPct) / 100);
+        // Sized so a month of simulated trading leaves a realistic shelf rather
+        // than emptying it: fast movers carry deeper cover than slow ones.
+        const packs = seed.reorder >= 100 ? randInt(40, 110) : randInt(10, 40);
 
         db.prepare(
           `INSERT INTO batches (product_id, batch_no, expiry, mrp_paise, purchase_rate_paise,
