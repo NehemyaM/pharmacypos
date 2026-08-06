@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api } from '../lib/api';
+import { api, downloadFile } from '../lib/api';
 import { formatDateTime } from '../lib/format';
-import { Alert, Spinner, Modal, PageHeader } from '../components/ui';
+import { Alert, Spinner, Modal, PageHeader, EmptyState } from '../components/ui';
 
 type Settings = {
   shop_name: string; legal_name: string; address_line1: string; address_line2: string;
@@ -19,14 +19,15 @@ type User = {
 };
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<'shop' | 'users' | 'audit'>('shop');
+  const [tab, setTab] = useState<'shop' | 'users' | 'backup' | 'audit'>('shop');
 
   return (
     <div className="p-6">
       <PageHeader title="Settings" subtitle="Shop particulars, staff accounts and audit trail" />
 
       <div className="mb-4 flex gap-2">
-        {([['shop', 'Shop details'], ['users', 'Staff'], ['audit', 'Audit log']] as const).map(([k, label]) => (
+        {([['shop', 'Shop details'], ['users', 'Staff'], ['backup', 'Backup'],
+          ['audit', 'Audit log']] as const).map(([k, label]) => (
           <button
             key={k} onClick={() => setTab(k)}
             className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -42,6 +43,7 @@ export default function SettingsPage() {
 
       {tab === 'shop' && <ShopSettings />}
       {tab === 'users' && <Users />}
+      {tab === 'backup' && <Backups />}
       {tab === 'audit' && <AuditLog />}
     </div>
   );
@@ -405,6 +407,138 @@ function UserForm({ target, onClose, onSaved }: {
         </div>
       </div>
     </Modal>
+  );
+}
+
+type BackupFile = { name: string; bytes: number; modified: string };
+
+function Backups() {
+  const [data, setData] = useState<{ directory: string; retain: number; backups: BackupFile[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  function load() {
+    api.get<typeof data>('/backup').then(setData).catch((e) => setError(e.message));
+  }
+  useEffect(load, []);
+
+  async function takeBackup() {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const r = await api.post<{ file: string; bytes: number; sales: number; verified: boolean }>(
+        '/backup', { label: '' },
+      );
+      setMessage(
+        `Backup taken and verified — ${(r.bytes / 1048576).toFixed(2)} MB covering ${r.sales} bills.`,
+      );
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Backup failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function download(name: string) {
+    setError('');
+    try {
+      await downloadFile(`/backup/download/${encodeURIComponent(name)}`, name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    }
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <Alert kind="warning">
+        <p className="font-semibold">Your entire shop is one file.</p>
+        <p className="mt-1 text-xs">
+          Stock, every bill, and the Schedule H1 register you must produce for three years all live
+          in a single database. A backup kept only on this computer is not a backup — download it
+          to a pen drive or cloud folder regularly. Take one before any software update.
+        </p>
+      </Alert>
+
+      {error && <Alert kind="error" onDismiss={() => setError('')}>{error}</Alert>}
+      {message && <Alert kind="success" onDismiss={() => setMessage('')}>{message}</Alert>}
+
+      <div className="flex items-center gap-3">
+        <button className="btn-primary" onClick={() => void takeBackup()} disabled={busy}>
+          {busy && <Spinner />} Back up now
+        </button>
+        {data && (
+          <span className="text-xs text-slate-500">
+            Saved to <code className="rounded bg-slate-100 px-1">{data.directory}</code>,
+            keeping the latest {data.retain}.
+          </span>
+        )}
+      </div>
+
+      <div className="card overflow-hidden">
+        {!data ? (
+          <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-slate-400" /></div>
+        ) : data.backups.length === 0 ? (
+          <EmptyState title="No backups yet" icon="💾"
+            hint="Take one now, then schedule it daily — see the README for Task Scheduler and cron." />
+        ) : (
+          <table className="w-full">
+            <thead className="border-b border-slate-200 bg-slate-50">
+              <tr>
+                <th className="th">Backup</th>
+                <th className="th">Taken</th>
+                <th className="th text-right">Size</th>
+                <th className="th"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.backups.map((b) => (
+                <tr key={b.name}>
+                  <td className="td font-mono text-xs">
+                    {b.name}
+                    {!/^pharmacy-[\dT:-]+\.sqlite$/.test(b.name) && (
+                      <span className="chip ml-2 border-brand-200 bg-brand-50 text-brand-700">
+                        kept
+                      </span>
+                    )}
+                  </td>
+                  <td className="td text-xs text-slate-600">{formatDateTime(b.modified)}</td>
+                  <td className="td text-right tabular">{(b.bytes / 1048576).toFixed(2)} MB</td>
+                  <td className="td text-right">
+                    <button
+                      className="text-xs text-slate-500 hover:text-brand-700 hover:underline"
+                      onClick={() => void download(b.name)}
+                    >
+                      Download
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card p-5 text-sm text-slate-600">
+        <h3 className="mb-2 text-sm font-semibold text-slate-700">Restoring</h3>
+        <ol className="list-decimal space-y-1 pl-5 text-xs">
+          <li>Stop PharmacyPOS.</li>
+          <li>Rename the damaged <code className="rounded bg-slate-100 px-1">pharmacy.sqlite</code> —
+            do not delete it; a partly-readable file is still evidence.</li>
+          <li>Copy the backup into its place and rename it to
+            <code className="ml-1 rounded bg-slate-100 px-1">pharmacy.sqlite</code>.</li>
+          <li>Delete any leftover <code className="rounded bg-slate-100 px-1">-wal</code> and
+            <code className="ml-1 rounded bg-slate-100 px-1">-shm</code> files beside it.</li>
+          <li>Start PharmacyPOS and check today's bill count on the Dashboard.</li>
+        </ol>
+        <p className="mt-2 text-xs text-slate-500">
+          Anything billed after the backup was taken will need re-entering, which is why a daily
+          schedule matters.
+        </p>
+      </div>
+    </div>
   );
 }
 

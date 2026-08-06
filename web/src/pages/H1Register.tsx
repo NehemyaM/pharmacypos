@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { formatDate, formatExpiry, todayIso, addMonths } from '../lib/format';
-import { Alert, Spinner, EmptyState, PageHeader } from '../components/ui';
+import { Alert, Spinner, EmptyState, PageHeader, ExportButton } from '../components/ui';
 
 type Entry = {
   id: number; serial_no: number; supply_date: string; sale_id: number; invoice_no: string;
@@ -41,7 +41,15 @@ export default function H1Register() {
       <PageHeader
         title="Schedule H1 Register"
         subtitle="Statutory record of every Schedule H1 and X supply"
-        actions={<button className="btn-secondary no-print" onClick={() => window.print()}>Print register</button>}
+        actions={
+          <div className="no-print flex items-start gap-2">
+            <ExportButton
+              path={`/exports/h1-register?from=${from}&to=${to}`}
+              filename="schedule-h1-register.csv"
+            />
+            <button className="btn-secondary" onClick={() => window.print()}>Print register</button>
+          </div>
+        }
       />
 
       <div className="no-print mb-4">

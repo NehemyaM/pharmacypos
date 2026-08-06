@@ -170,7 +170,11 @@ await page.screenshot({ path: `${SHOT}/09-gst-report.png`, fullPage: true });
 
 await page.goto(`${BASE}/purchases`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(600);
-check('purchases page renders', await page.locator('text=Goods inward').isVisible());
+// "Goods inward" is both a tab and part of the subtitle, so scope to the tab.
+check('purchases page renders',
+  await page.locator('button:has-text("Goods inward")').isVisible());
+check('purchases has returns and ledger tabs',
+  await page.locator('button:has-text("Supplier ledger")').isVisible());
 
 await page.goto(`${BASE}/products`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(700);

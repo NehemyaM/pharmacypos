@@ -70,6 +70,22 @@ product movement with margins, expiry pipeline, reorder list, audit log.
 charged. Cumulative returns can never exceed what was billed. Expired goods are
 refunded but never restocked.
 
+**Returns to distributor.** Send near-expiry or damaged stock back for credit.
+Pick the batches, raise a debit note at cost, and track the claim until the
+distributor issues their credit note — they often credit less than claimed, so
+record what actually arrived.
+
+**Supplier ledger.** What you owe each distributor, netting purchases against
+payments and credit received on returns. Each invoice is aged against its own
+due date (invoice date + that supplier's credit period), so overdue bills stand
+out rather than hiding in a total.
+
+**Backup.** A verified daily backup of the one file that is your entire shop,
+downloadable off the machine, with a documented restore. See below.
+
+**Export.** Every report downloads as CSV, with amounts as real numbers your
+accountant can total.
+
 ---
 
 ## The India-specific decisions
@@ -129,12 +145,49 @@ in the Indian system, IST timestamps so "today's sales" doesn't shift at
 
 ---
 
+## Backups — read this before going live
+
+Your entire shop is one file: `data/pharmacy.sqlite`. Stock, every bill, and the
+Schedule H1 register you must produce for three years. If that file dies and you
+have no copy, the business is gone.
+
+```bash
+npm run backup                      # verified backup, prunes to the last 30
+npm run backup -- --label pre-update
+npm run backup:list
+npm run backup -- --verify <file>   # accepts a path or just the filename
+```
+
+Copying the file with `cp` while the app is running is **not safe** — in WAL
+mode the newest bills live partly in a side file, so a plain copy can miss them
+or capture a torn page. `npm run backup` uses SQLite's own `VACUUM INTO`, which
+writes a consistent copy with the shop still billing. Each backup is then
+reopened and integrity-checked before it counts; the command exits non-zero if
+verification fails, so a scheduler can alert you.
+
+Admins can also take and download a backup from **Settings → Backup**. Do that:
+a copy on the same machine as the original is not a backup.
+
+**Schedule it daily.**
+
+- *Windows*: Task Scheduler → daily → Program `npm`, Arguments `run backup`,
+  Start in the project folder.
+- *Linux/macOS*: `0 22 * * * cd /path/to/pharmacypos && npm run backup`
+
+**To restore**: stop the app, rename the damaged `pharmacy.sqlite` (don't delete
+it), copy a backup into its place under that name, delete any leftover `-wal`
+and `-shm` files beside it, start the app, and check today's bill count on the
+Dashboard. Anything billed after the backup was taken must be re-entered.
+
+---
+
 ## Verification
 
 ```bash
-npm test            # 46 unit tests — GST, money, FEFO, schedule rules
-npm run verify:api  # 64 end-to-end API checks against a running server
-npm run verify:ui   # 38 browser checks driving the real UI in Chromium
+npm test                          # 63 unit tests — GST, money, FEFO, CSV, schedule rules
+npm run verify:api                # 64 end-to-end API checks against a running server
+npm run verify:ui                 # 39 browser checks driving the real UI in Chromium
+node e2e/verify-new-features.mjs  # 25 checks: backup, export, returns, ledger
 ```
 
 The unit tests pin the arithmetic: that ₹105 at 5% is ₹100 + ₹2.50 + ₹2.50,
@@ -178,8 +231,21 @@ and one process on a shop counter PC.
 
 ---
 
+## Still missing
+
+Honest list, so nothing is a surprise:
+
+- **No bulk product import.** A real medical store carries thousands of SKUs and
+  there is no CSV importer yet — masters must be entered by hand. This is the
+  single biggest obstacle to going live.
+- SQLite is single-machine by design. Right for a counter PC, wrong for
+  multi-branch; that would mean migrating to Postgres.
+- Printing goes through the browser's print dialog. The planned desktop build
+  prints silently to the till printer.
+
 ## Notes before going live
 
+- **Schedule the daily backup** and check it runs. See the backup section above.
 - Change the three demo passwords, and delete any account you don't need.
 - Put the real shop particulars into Settings: GSTIN, both drug licence
   numbers, FSSAI number if you sell supplements, and the registered

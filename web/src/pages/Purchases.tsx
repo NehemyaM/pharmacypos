@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { api } from '../lib/api';
 import { rupees, formatDate, formatExpiry, rupeesInput, paiseFromInput, currentMonthIso, todayIso } from '../lib/format';
-import { Alert, Spinner, Modal, EmptyState, PageHeader } from '../components/ui';
+import { Alert, Spinner, Modal, EmptyState, PageHeader, ExportButton, Tile } from '../components/ui';
 
 type Supplier = { id: number; name: string; state_code: string; gstin: string; city: string };
 type ProductHit = {
@@ -26,7 +26,42 @@ type Line = {
   discount_pct: number;
 };
 
+type Tab = 'inward' | 'returns' | 'ledger';
+
 export default function Purchases() {
+  const [tab, setTab] = useState<Tab>('inward');
+
+  return (
+    <div className="p-6">
+      <PageHeader
+        title="Purchases"
+        subtitle="Goods inward, returns to distributor, and what you owe each supplier"
+      />
+      <div className="mb-4 flex gap-2">
+        {([['inward', 'Goods inward'], ['returns', 'Returns to supplier'],
+          ['ledger', 'Supplier ledger']] as const).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+              tab === k
+                ? 'border-brand-500 bg-brand-50 text-brand-800'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'inward' && <GoodsInward />}
+      {tab === 'returns' && <SupplierReturns />}
+      {tab === 'ledger' && <SupplierLedger />}
+    </div>
+  );
+}
+
+function GoodsInward() {
   const [rows, setRows] = useState<PurchaseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -42,12 +77,12 @@ export default function Purchases() {
   useEffect(load, []);
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title="Purchases"
-        subtitle="Goods inward against distributor tax invoices — creates batches and claims input credit"
-        actions={<button className="btn-primary" onClick={() => setEntering(true)}>New purchase entry</button>}
-      />
+    <>
+      <div className="mb-4 flex items-center gap-2">
+        <button className="btn-primary" onClick={() => setEntering(true)}>New purchase entry</button>
+        <ExportButton path="/exports/purchases?from=2000-01-01&to=2100-01-01"
+          filename="purchase-register.csv" />
+      </div>
 
       {error && <div className="mb-4"><Alert kind="error" onDismiss={() => setError('')}>{error}</Alert></div>}
 
@@ -105,7 +140,7 @@ export default function Purchases() {
         <PurchaseEntry onClose={() => setEntering(false)} onSaved={() => { setEntering(false); load(); }} />
       )}
       {viewing && <PurchaseDetail id={viewing} onClose={() => setViewing(null)} />}
-    </div>
+    </>
   );
 }
 
@@ -478,6 +513,670 @@ function PurchaseDetail({ id, onClose }: { id: number; onClose: () => void }) {
           </table>
         </div>
       )}
+    </Modal>
+  );
+}
+
+// ===========================================================================
+// Returns to supplier — near-expiry and damaged stock going back for credit
+// ===========================================================================
+
+type Candidate = {
+  batch_id: number; batch_no: string; expiry: string; qty_units: number;
+  purchase_rate_paise: number; mrp_paise: number; product_id: number;
+  product_name: string; manufacturer: string; unit: string; pack_size: number;
+  rack: string; supplier_id: number | null; supplier_name: string | null;
+  supplier_phone: string | null; claim_value_paise: number; suggested_reason: string;
+};
+
+type ReturnRow = {
+  id: number; return_no: string; return_date: string; supplier_name: string;
+  reason: string; total_paise: number; status: string; credited_paise: number;
+  credit_note_no: string; item_count: number;
+};
+
+function SupplierReturns() {
+  const [rows, setRows] = useState<ReturnRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [settling, setSettling] = useState<ReturnRow | null>(null);
+
+  function load() {
+    setLoading(true);
+    api.get<ReturnRow[]>('/purchase-returns')
+      .then(setRows).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  }
+  useEffect(load, []);
+
+  const pending = rows.filter((r) => r.status === 'PENDING');
+  const pendingValue = pending.reduce((s, r) => s + r.total_paise, 0);
+
+  return (
+    <>
+      <div className="mb-4">
+        <Alert kind="info">
+          Most distributors accept returns 3–6 months before expiry. Send stock back while the
+          credit is still available rather than writing it off later.
+        </Alert>
+      </div>
+
+      <div className="mb-4 flex items-center gap-3">
+        <button className="btn-primary" onClick={() => setCreating(true)}>New return</button>
+        {pending.length > 0 && (
+          <span className="text-sm text-slate-600">
+            <strong className="tabular">{pending.length}</strong> claims awaiting credit,
+            worth <strong className="tabular">{rupees(pendingValue)}</strong>
+          </span>
+        )}
+      </div>
+
+      {error && <div className="mb-4"><Alert kind="error" onDismiss={() => setError('')}>{error}</Alert></div>}
+
+      <div className="card overflow-hidden">
+        {loading ? (
+          <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-slate-400" /></div>
+        ) : rows.length === 0 ? (
+          <EmptyState title="No returns raised yet" icon="↩️"
+            hint="Check the expiry report, then raise a return for anything the supplier will still credit." />
+        ) : (
+          <table className="w-full">
+            <thead className="border-b border-slate-200 bg-slate-50">
+              <tr>
+                <th className="th">Debit note</th>
+                <th className="th">Date</th>
+                <th className="th">Supplier</th>
+                <th className="th">Reason</th>
+                <th className="th text-right">Items</th>
+                <th className="th text-right">Claimed</th>
+                <th className="th">Status</th>
+                <th className="th"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="td font-mono text-xs font-medium">{r.return_no}</td>
+                  <td className="td">{formatDate(r.return_date)}</td>
+                  <td className="td">{r.supplier_name}</td>
+                  <td className="td text-xs text-slate-600">{r.reason.replace(/_/g, ' ')}</td>
+                  <td className="td text-right tabular">{r.item_count}</td>
+                  <td className="td text-right font-semibold tabular">{rupees(r.total_paise)}</td>
+                  <td className="td">
+                    <span className={`chip ${
+                      r.status === 'CREDITED' ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : r.status === 'REJECTED' ? 'border-red-200 bg-red-50 text-red-700'
+                          : 'border-amber-200 bg-amber-50 text-amber-700'
+                    }`}>{r.status}</span>
+                    {r.status === 'CREDITED' && r.credited_paise !== r.total_paise && (
+                      <span className="block text-[11px] text-slate-500">
+                        got {rupees(r.credited_paise)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="td text-right">
+                    {r.status === 'PENDING' && (
+                      <button className="text-xs text-slate-500 hover:text-brand-700 hover:underline"
+                        onClick={() => setSettling(r)}>Record credit</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {creating && (
+        <ReturnEntry onClose={() => setCreating(false)} onSaved={() => { setCreating(false); load(); }} />
+      )}
+      {settling && (
+        <SettleModal row={settling} onClose={() => setSettling(null)}
+          onSaved={() => { setSettling(null); load(); }} />
+      )}
+    </>
+  );
+}
+
+function ReturnEntry({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [months, setMonths] = useState(3);
+  const [supplierId, setSupplierId] = useState<number | null>(null);
+  const [qty, setQty] = useState<Record<number, number>>({});
+  const [reason, setReason] = useState('NEAR_EXPIRY');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get<Candidate[]>(`/purchase-returns/candidates/list?months=${months}`)
+      .then(setCandidates).catch((e) => setError(e.message));
+  }, [months]);
+
+  // A debit note goes to one distributor, so only their batches can be on it.
+  const suppliers = [...new Map(
+    candidates.filter((c) => c.supplier_id).map((c) => [c.supplier_id, c.supplier_name]),
+  ).entries()];
+  const visible = supplierId ? candidates.filter((c) => c.supplier_id === supplierId) : [];
+  const selected = Object.entries(qty).filter(([, q]) => q > 0);
+
+  const claimValue = visible.reduce((sum, c) => {
+    const q = qty[c.batch_id] ?? 0;
+    return sum + Math.round((c.purchase_rate_paise * q) / c.pack_size);
+  }, 0);
+
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/purchase-returns', {
+        supplier_id: supplierId, reason, notes,
+        items: selected.map(([batchId, q]) => ({ batch_id: Number(batchId), qty_units: q })),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the return');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} width="max-w-5xl" title="Return stock to supplier">
+      <div className="space-y-4">
+        {error && <Alert kind="error">{error}</Alert>}
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="label">Show stock expiring within</label>
+            <select className="input" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
+              <option value={1}>1 month</option>
+              <option value={3}>3 months</option>
+              <option value={6}>6 months</option>
+              <option value={12}>12 months</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Supplier</label>
+            <select className="input" value={supplierId ?? ''}
+              onChange={(e) => { setSupplierId(Number(e.target.value) || null); setQty({}); }}>
+              <option value="">Select supplier…</option>
+              {suppliers.map(([id, name]) => <option key={id} value={id!}>{name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Reason</label>
+            <select className="input" value={reason} onChange={(e) => setReason(e.target.value)}>
+              <option value="NEAR_EXPIRY">Near expiry</option>
+              <option value="EXPIRED">Expired</option>
+              <option value="DAMAGED">Damaged</option>
+              <option value="WRONG_SUPPLY">Wrong supply</option>
+              <option value="RECALL">Product recall</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </div>
+        </div>
+
+        {!supplierId ? (
+          <EmptyState title="Choose a supplier" icon="🚚"
+            hint="A debit note goes to one distributor, so pick whose stock you are sending back." />
+        ) : visible.length === 0 ? (
+          <EmptyState title="Nothing to return for this supplier" icon="✅"
+            hint="Widen the expiry window if you expected to see stock here." />
+        ) : (
+          <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="th">Product</th>
+                  <th className="th">Batch</th>
+                  <th className="th">Expiry</th>
+                  <th className="th text-right">In stock</th>
+                  <th className="th text-right">Cost/pack</th>
+                  <th className="th text-right">Return qty</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visible.map((c) => (
+                  <tr key={c.batch_id} className={c.suggested_reason === 'EXPIRED' ? 'bg-red-50' : ''}>
+                    <td className="td">
+                      {c.product_name}
+                      <span className="block text-xs text-slate-400">{c.manufacturer}</span>
+                    </td>
+                    <td className="td font-mono text-xs">{c.batch_no}</td>
+                    <td className={`td ${c.suggested_reason === 'EXPIRED' ? 'font-semibold text-red-600' : 'text-amber-600'}`}>
+                      {formatExpiry(c.expiry)}
+                    </td>
+                    <td className="td text-right tabular">{c.qty_units} {c.unit}</td>
+                    <td className="td text-right tabular text-slate-500">
+                      {rupees(c.purchase_rate_paise)}
+                    </td>
+                    <td className="td text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <input type="number" min={0} max={c.qty_units}
+                          className="input w-20 py-1 text-right tabular"
+                          value={qty[c.batch_id] ?? 0}
+                          onChange={(e) => setQty((p) => ({
+                            ...p,
+                            [c.batch_id]: Math.min(c.qty_units, Math.max(0, Number(e.target.value) || 0)),
+                          }))} />
+                        <button className="text-[11px] text-brand-700 hover:underline"
+                          onClick={() => setQty((p) => ({ ...p, [c.batch_id]: c.qty_units }))}>
+                          all
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div>
+          <label className="label">Notes</label>
+          <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g. Collected by their delivery boy on Tuesday" />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-600">
+            Claiming <strong className="tabular">{rupees(claimValue)}</strong> at cost,
+            across {selected.length} batch{selected.length === 1 ? '' : 'es'}
+          </p>
+          <div className="flex gap-2">
+            <button className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn-primary" disabled={selected.length === 0 || busy}
+              onClick={() => void submit()}>
+              {busy && <Spinner />} Raise debit note
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function SettleModal({ row, onClose, onSaved }: {
+  row: ReturnRow; onClose: () => void; onSaved: () => void;
+}) {
+  const [status, setStatus] = useState<'CREDITED' | 'REJECTED'>('CREDITED');
+  const [creditNoteNo, setCreditNoteNo] = useState('');
+  const [amount, setAmount] = useState(rupeesInput(row.total_paise));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post(`/purchase-returns/${row.id}/settle`, {
+        status, credit_note_no: creditNoteNo, credited_paise: paiseFromInput(amount),
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not record the credit');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Record the distributor's response — ${row.return_no}`}>
+      <div className="space-y-3">
+        {error && <Alert kind="error">{error}</Alert>}
+        <p className="text-sm text-slate-600">
+          Claimed <strong className="tabular">{rupees(row.total_paise)}</strong> from {row.supplier_name}.
+        </p>
+        <div>
+          <label className="label">Outcome</label>
+          <select className="input" value={status}
+            onChange={(e) => setStatus(e.target.value as typeof status)}>
+            <option value="CREDITED">Credit received</option>
+            <option value="REJECTED">Claim rejected</option>
+          </select>
+        </div>
+        {status === 'CREDITED' && (
+          <>
+            <div>
+              <label className="label">Their credit note number</label>
+              <input className="input font-mono" value={creditNoteNo}
+                onChange={(e) => setCreditNoteNo(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Amount credited (₹)</label>
+              <input className="input tabular text-right" value={amount}
+                onChange={(e) => setAmount(e.target.value)} />
+              <p className="mt-1 text-xs text-slate-400">
+                Distributors often credit less than claimed. Enter what they actually gave.
+              </p>
+            </div>
+          </>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={busy} onClick={() => void submit()}>
+            {busy && <Spinner />} Save
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ===========================================================================
+// Supplier ledger — what the shop owes each distributor
+// ===========================================================================
+
+type Outstanding = {
+  id: number; name: string; phone: string; contact_person: string; credit_days: number;
+  invoices: number; billed_paise: number; paid_at_entry_paise: number; payments_paise: number;
+  return_credit_paise: number; outstanding_paise: number; pending_claim_paise: number;
+};
+
+function SupplierLedger() {
+  const [data, setData] = useState<{ rows: Outstanding[]; totals: any } | null>(null);
+  const [error, setError] = useState('');
+  const [statementFor, setStatementFor] = useState<Outstanding | null>(null);
+  const [payingFor, setPayingFor] = useState<Outstanding | null>(null);
+
+  function load() {
+    api.get<{ rows: Outstanding[]; totals: any }>('/supplier-ledger/outstanding')
+      .then(setData).catch((e) => setError(e.message));
+  }
+  useEffect(load, []);
+
+  if (error) return <Alert kind="error">{error}</Alert>;
+  if (!data) return <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-slate-400" /></div>;
+
+  const active = data.rows.filter((r) => r.invoices > 0);
+
+  return (
+    <>
+      <div className="mb-4 grid gap-4 sm:grid-cols-3">
+        <Tile label="Total purchased" value={rupees(data.totals.billed_paise)} />
+        <Tile label="Outstanding" value={rupees(data.totals.outstanding_paise)}
+          tone={data.totals.outstanding_paise > 0 ? 'warn' : 'good'} />
+        <Tile label="Claims awaiting credit" value={rupees(data.totals.pending_claim_paise)}
+          sub="Debit notes not yet settled" />
+      </div>
+
+      <div className="card overflow-hidden">
+        {active.length === 0 ? (
+          <EmptyState title="No purchases recorded" icon="🧾"
+            hint="Enter a distributor invoice under Goods inward and it will appear here." />
+        ) : (
+          <table className="w-full">
+            <thead className="border-b border-slate-200 bg-slate-50">
+              <tr>
+                <th className="th">Supplier</th>
+                <th className="th text-right">Invoices</th>
+                <th className="th text-right">Purchased</th>
+                <th className="th text-right">Paid</th>
+                <th className="th text-right">Return credit</th>
+                <th className="th text-right">Outstanding</th>
+                <th className="th text-right">Credit days</th>
+                <th className="th"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {active.map((s) => (
+                <tr key={s.id}>
+                  <td className="td">
+                    <span className="font-medium text-slate-800">{s.name}</span>
+                    {s.phone && <span className="block text-xs text-slate-400">{s.phone}</span>}
+                  </td>
+                  <td className="td text-right tabular">{s.invoices}</td>
+                  <td className="td text-right tabular">{rupees(s.billed_paise)}</td>
+                  <td className="td text-right tabular text-emerald-700">
+                    {rupees(s.paid_at_entry_paise + s.payments_paise)}
+                  </td>
+                  <td className="td text-right tabular text-slate-500">
+                    {s.return_credit_paise > 0 ? rupees(s.return_credit_paise) : '—'}
+                  </td>
+                  <td className={`td text-right font-semibold tabular ${
+                    s.outstanding_paise > 0 ? 'text-amber-700' : 'text-slate-400'
+                  }`}>
+                    {rupees(s.outstanding_paise)}
+                  </td>
+                  <td className="td text-right tabular text-slate-500">{s.credit_days}</td>
+                  <td className="td whitespace-nowrap text-right">
+                    <button className="text-xs text-slate-500 hover:text-brand-700 hover:underline"
+                      onClick={() => setStatementFor(s)}>Statement</button>
+                    <button className="ml-3 text-xs text-slate-500 hover:text-brand-700 hover:underline"
+                      onClick={() => setPayingFor(s)}>Pay</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {statementFor && (
+        <StatementModal supplier={statementFor} onClose={() => setStatementFor(null)} />
+      )}
+      {payingFor && (
+        <PaymentModal supplier={payingFor} onClose={() => setPayingFor(null)}
+          onSaved={() => { setPayingFor(null); load(); }} />
+      )}
+    </>
+  );
+}
+
+function StatementModal({ supplier, onClose }: { supplier: Outstanding; onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    api.get(`/supplier-ledger/statement/${supplier.id}`).then(setData).catch(() => setData(null));
+  }, [supplier.id]);
+
+  return (
+    <Modal open onClose={onClose} width="max-w-4xl" title={`Statement — ${supplier.name}`}>
+      {!data ? (
+        <div className="flex justify-center py-10"><Spinner className="h-5 w-5 text-slate-400" /></div>
+      ) : (
+        <div className="space-y-5">
+          <div>
+            <h3 className="mb-2 text-sm font-semibold text-slate-700">
+              Invoices <span className="font-normal text-slate-400">
+                (due date = invoice date + {supplier.credit_days} days credit)
+              </span>
+            </h3>
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="th">Invoice</th>
+                  <th className="th">Date</th>
+                  <th className="th">Due by</th>
+                  <th className="th text-right">Total</th>
+                  <th className="th text-right">Outstanding</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {data.invoices.map((i: any) => (
+                  <tr key={i.id} className={i.due_paise > 0 && i.days_overdue > 0 ? 'bg-red-50' : ''}>
+                    <td className="td font-mono text-xs">{i.invoice_no}</td>
+                    <td className="td">{formatDate(i.invoice_date)}</td>
+                    <td className="td">
+                      {formatDate(i.due_date)}
+                      {i.due_paise > 0 && i.days_overdue > 0 && (
+                        <span className="block text-[11px] font-semibold text-red-600">
+                          overdue {i.days_overdue} days
+                        </span>
+                      )}
+                    </td>
+                    <td className="td text-right tabular">{rupees(i.total_paise)}</td>
+                    <td className={`td text-right tabular ${i.due_paise > 0 ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>
+                      {i.due_paise > 0 ? rupees(i.due_paise) : 'Paid'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {data.payments.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-slate-700">Payments made</h3>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="th">Payment</th>
+                    <th className="th">Date</th>
+                    <th className="th">Against</th>
+                    <th className="th">Mode</th>
+                    <th className="th text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.payments.map((p: any) => (
+                    <tr key={p.id}>
+                      <td className="td font-mono text-xs">{p.payment_no}</td>
+                      <td className="td">{formatDate(p.payment_date)}</td>
+                      <td className="td text-xs">{p.invoice_no ?? 'On account'}</td>
+                      <td className="td text-xs">{p.mode}</td>
+                      <td className="td text-right font-medium tabular">{rupees(p.amount_paise)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {data.returns.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-slate-700">Returns to this supplier</h3>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="th">Debit note</th>
+                    <th className="th">Date</th>
+                    <th className="th">Reason</th>
+                    <th className="th text-right">Claimed</th>
+                    <th className="th">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.returns.map((r: any) => (
+                    <tr key={r.id}>
+                      <td className="td font-mono text-xs">{r.return_no}</td>
+                      <td className="td">{formatDate(r.return_date)}</td>
+                      <td className="td text-xs">{r.reason.replace(/_/g, ' ')}</td>
+                      <td className="td text-right tabular">{rupees(r.total_paise)}</td>
+                      <td className="td text-xs">{r.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function PaymentModal({ supplier, onClose, onSaved }: {
+  supplier: Outstanding; onClose: () => void; onSaved: () => void;
+}) {
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [purchaseId, setPurchaseId] = useState<number | null>(null);
+  const [amount, setAmount] = useState('');
+  const [mode, setMode] = useState('BANK');
+  const [reference, setReference] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get<any>(`/supplier-ledger/statement/${supplier.id}`)
+      .then((d) => setInvoices(d.invoices.filter((i: any) => i.due_paise > 0)))
+      .catch(() => setInvoices([]));
+  }, [supplier.id]);
+
+  const chosen = invoices.find((i) => i.id === purchaseId);
+
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/supplier-ledger/payments', {
+        supplier_id: supplier.id,
+        purchase_id: purchaseId,
+        amount_paise: paiseFromInput(amount),
+        mode, reference,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not record the payment');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Record payment — ${supplier.name}`}>
+      <div className="space-y-3">
+        {error && <Alert kind="error">{error}</Alert>}
+        <p className="text-sm text-slate-600">
+          Outstanding: <strong className="tabular">{rupees(supplier.outstanding_paise)}</strong>
+        </p>
+
+        <div>
+          <label className="label">Against invoice</label>
+          <select className="input" value={purchaseId ?? ''}
+            onChange={(e) => {
+              const id = Number(e.target.value) || null;
+              setPurchaseId(id);
+              const inv = invoices.find((i) => i.id === id);
+              if (inv) setAmount(rupeesInput(inv.due_paise));
+            }}>
+            <option value="">On account (not a specific invoice)</option>
+            {invoices.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.invoice_no} — {formatDate(i.invoice_date)} — due {rupees(i.due_paise)}
+              </option>
+            ))}
+          </select>
+          {chosen && (
+            <p className="mt-1 text-xs text-slate-400">
+              This invoice has {rupees(chosen.due_paise)} outstanding.
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Amount (₹)</label>
+            <input className="input tabular text-right" value={amount}
+              onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Mode</label>
+            <select className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="BANK">Bank transfer</option>
+              <option value="UPI">UPI</option>
+              <option value="CASH">Cash</option>
+              <option value="CHEQUE">Cheque</option>
+              <option value="ADJUSTMENT">Adjustment</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Reference</label>
+          <input className="input" value={reference} onChange={(e) => setReference(e.target.value)}
+            placeholder="UTR, cheque number or UPI reference" />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={paiseFromInput(amount) <= 0 || busy}
+            onClick={() => void submit()}>
+            {busy && <Spinner />} Record payment
+          </button>
+        </div>
+      </div>
     </Modal>
   );
 }

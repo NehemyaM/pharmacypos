@@ -16,7 +16,10 @@
     "test": "npm run test --workspace server",
     "verify:api": "npm run smoke --workspace server",
     "verify:ui": "node e2e/ui-verify.mjs",
-    "seed": "npm run seed --workspace server",
+    "seed": "npm run seed --workspace server --",
+    "seed:force": "npm run seed --workspace server -- --force",
+    "backup": "npm run backup --workspace server --",
+    "backup:list": "npm run backup --workspace server -- --list",
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web"
   },
   "devDependencies": {

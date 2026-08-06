@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "seed": "tsx src/db/seed.ts",
     "smoke": "tsx src/smoke.ts",
+    "backup": "tsx src/backup-cli.ts",
     "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

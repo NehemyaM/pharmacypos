@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api, type SessionUser } from '../lib/api';
 import { rupees, formatDate, formatExpiry, todayIso } from '../lib/format';
-import { Alert, Spinner, EmptyState, PageHeader, Tile } from '../components/ui';
+import { Alert, Spinner, EmptyState, PageHeader, Tile, ExportButton } from '../components/ui';
 
 type Tab = 'gst' | 'sales' | 'movement' | 'expiry' | 'reorder' | 'daybook';
 
@@ -13,6 +13,19 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'expiry', label: 'Expiry pipeline' },
   { key: 'reorder', label: 'Reorder list' },
 ];
+
+/** Map the visible tab to the CSV endpoint that backs it. */
+function exportPath(tab: Tab, from: string, to: string): string {
+  const period = `from=${from}&to=${to}`;
+  switch (tab) {
+    case 'daybook': return `/exports/daybook?date=${to}`;
+    case 'sales': return `/exports/sales?${period}`;
+    case 'gst': return `/exports/gst?${period}`;
+    case 'movement': return `/exports/movement?${period}`;
+    case 'expiry': return '/exports/expiry?months=12';
+    case 'reorder': return '/exports/reorder';
+  }
+}
 
 export default function Reports({ user }: { user: SessionUser }) {
   const [tab, setTab] = useState<Tab>('daybook');
@@ -27,7 +40,12 @@ export default function Reports({ user }: { user: SessionUser }) {
       <PageHeader
         title="Reports"
         subtitle="Trading, tax and stock analysis"
-        actions={<button className="btn-secondary no-print" onClick={() => window.print()}>Print</button>}
+        actions={
+          <div className="no-print flex items-start gap-2">
+            <ExportButton path={exportPath(tab, from, to)} filename={`${tab}.csv`} />
+            <button className="btn-secondary" onClick={() => window.print()}>Print</button>
+          </div>
+        }
       />
 
       <div className="no-print mb-4 flex flex-wrap items-end gap-2">

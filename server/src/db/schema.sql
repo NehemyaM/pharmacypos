@@ -417,3 +417,89 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_date ON audit_log(created_at);
+
+-- ---------------------------------------------------------------------------
+-- Purchase returns (debit notes to the distributor)
+--
+-- Chemists routinely send near-expiry and damaged stock back to the supplier
+-- for credit — most distributors accept returns 3-6 months before expiry.
+-- Unlike a sales return this is goods going OUT of the shop, so stock reduces.
+-- A claim stays PENDING until the distributor issues the credit note.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS purchase_returns (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  return_no       TEXT    NOT NULL UNIQUE,
+  return_date     TEXT    NOT NULL,
+  supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+  is_interstate   INTEGER NOT NULL DEFAULT 0,
+  reason          TEXT    NOT NULL DEFAULT 'NEAR_EXPIRY'
+                  CHECK (reason IN ('NEAR_EXPIRY','EXPIRED','DAMAGED','WRONG_SUPPLY','RECALL','OTHER')),
+  notes           TEXT    NOT NULL DEFAULT '',
+  taxable_paise   INTEGER NOT NULL DEFAULT 0,
+  cgst_paise      INTEGER NOT NULL DEFAULT 0,
+  sgst_paise      INTEGER NOT NULL DEFAULT 0,
+  igst_paise      INTEGER NOT NULL DEFAULT 0,
+  round_off_paise INTEGER NOT NULL DEFAULT 0,
+  total_paise     INTEGER NOT NULL DEFAULT 0,
+  -- Credit claimed from the distributor, settled when they issue a credit note
+  status          TEXT    NOT NULL DEFAULT 'PENDING'
+                  CHECK (status IN ('PENDING','CREDITED','REJECTED')),
+  credit_note_no  TEXT    NOT NULL DEFAULT '',
+  credited_paise  INTEGER NOT NULL DEFAULT 0,
+  settled_at      TEXT,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_supplier ON purchase_returns(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_date     ON purchase_returns(return_date);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_status   ON purchase_returns(status);
+
+CREATE TABLE IF NOT EXISTS purchase_return_items (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  return_id      INTEGER NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+  product_id     INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  batch_id       INTEGER NOT NULL REFERENCES batches(id) ON DELETE RESTRICT,
+  product_name   TEXT    NOT NULL,
+  manufacturer   TEXT    NOT NULL DEFAULT '',
+  hsn_code       TEXT    NOT NULL DEFAULT '3004',
+  batch_no       TEXT    NOT NULL,
+  expiry         TEXT    NOT NULL,
+  pack_size      INTEGER NOT NULL DEFAULT 1,
+  qty_units      INTEGER NOT NULL CHECK (qty_units > 0),
+  -- Returned at the rate it was bought at, exclusive of GST
+  rate_paise     INTEGER NOT NULL,
+  mrp_paise      INTEGER NOT NULL DEFAULT 0,
+  gst_rate       INTEGER NOT NULL DEFAULT 5,
+  taxable_paise  INTEGER NOT NULL,
+  cgst_paise     INTEGER NOT NULL DEFAULT 0,
+  sgst_paise     INTEGER NOT NULL DEFAULT 0,
+  igst_paise     INTEGER NOT NULL DEFAULT 0,
+  total_paise    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_purchase_return_items_return ON purchase_return_items(return_id);
+
+-- ---------------------------------------------------------------------------
+-- Supplier payments — a running account per distributor
+--
+-- What is owed is: purchases - payments - credit received on returns.
+-- Distributors work on credit periods (see suppliers.credit_days), so the
+-- outstanding statement ages each invoice against its own due date.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS supplier_payments (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_no    TEXT    NOT NULL UNIQUE,
+  payment_date  TEXT    NOT NULL,
+  supplier_id   INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+  -- Optional: a payment may settle one invoice or be on account
+  purchase_id   INTEGER REFERENCES purchases(id) ON DELETE SET NULL,
+  amount_paise  INTEGER NOT NULL CHECK (amount_paise > 0),
+  mode          TEXT    NOT NULL DEFAULT 'CASH'
+                CHECK (mode IN ('CASH','UPI','BANK','CHEQUE','ADJUSTMENT')),
+  reference     TEXT    NOT NULL DEFAULT '',
+  notes         TEXT    NOT NULL DEFAULT '',
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_supplier ON supplier_payments(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_date     ON supplier_payments(payment_date);
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_purchase ON supplier_payments(purchase_id);

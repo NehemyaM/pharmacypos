@@ -11,6 +11,7 @@
 import bcrypt from 'bcryptjs';
 import { getDb, nowIso, today, addMonths, currentMonth, nextCounter, financialYear } from './index.js';
 import { computeLine } from '../lib/billing.js';
+import { addExclusive } from '../lib/gst.js';
 import { roundOff } from '../lib/money.js';
 
 const force = process.argv.includes('--force');
@@ -137,8 +138,11 @@ function alreadySeeded(): boolean {
 }
 
 function wipe(): void {
+  // Every table, children before parents. Anything missing here survives a
+  // --force reseed and collides with the new data on a unique key.
   const tables = [
     'h1_register', 'sale_return_items', 'sale_returns', 'sale_items', 'sales',
+    'purchase_return_items', 'purchase_returns', 'supplier_payments',
     'purchase_items', 'purchases', 'stock_ledger', 'stock_adjustments', 'batches',
     'products', 'customers', 'doctors', 'suppliers', 'audit_log', 'counters',
     'users', 'settings',
@@ -303,6 +307,7 @@ function main(): void {
   })();
 
   seedSalesHistory();
+  seedPurchaseHistory();
 
   console.log('\nSeed complete.\n');
   console.log('  Shop     : Sai Krishna Medical & General Stores, Habsiguda, Hyderabad');
@@ -461,6 +466,187 @@ function seedSalesHistory(): void {
 
   const h1 = db.prepare('SELECT COUNT(*) c FROM h1_register').get() as { c: number };
   console.log(`  ${bills} historical bills over 31 days, ${h1.c} Schedule H1 register entries`);
+}
+
+/**
+ * Generate goods-inward history: distributor invoices topping up stock the shop
+ * already carries, the payments made against them, and one debit note for
+ * near-expiry stock going back. Without this the Purchases, Supplier ledger and
+ * Purchase returns screens are empty on a fresh install and look broken.
+ */
+function seedPurchaseHistory(): void {
+  const suppliers = db.prepare('SELECT * FROM suppliers').all() as Array<{
+    id: number; name: string; state_code: string; credit_days: number;
+  }>;
+  const products = db.prepare('SELECT * FROM products WHERE active = 1').all() as Array<{
+    id: number; name: string; pack_size: number; gst_rate: number;
+  }>;
+  const settings = db.prepare('SELECT state_code FROM settings WHERE id = 1').get() as
+    { state_code: string };
+
+  let invoices = 0, payments = 0;
+
+  db.transaction(() => {
+    // Invoices spread over ~2 months, so some sit inside their credit period and
+    // some are overdue — otherwise the ageing report has nothing to show.
+    for (let n = 0; n < 16; n++) {
+      const daysAgo = randInt(1, 70);
+      const invoiceDate = (db.prepare("SELECT date('now', ?, 'localtime') d")
+        .get(`-${daysAgo} days`) as { d: string }).d;
+      const supplier = pick(suppliers);
+      const isInterstate = supplier.state_code !== settings.state_code;
+      const ts = nowIso();
+
+      const info = db.prepare(
+        `INSERT INTO purchases (invoice_no, invoice_date, supplier_id, is_interstate,
+           payment_mode, notes, created_by, created_at) VALUES (?,?,?,?,'CREDIT','',1,?)`,
+      ).run(`${supplier.name.slice(0, 3).toUpperCase()}/${randInt(1000, 9999)}`,
+        invoiceDate, supplier.id, isInterstate ? 1 : 0, ts);
+      const purchaseId = Number(info.lastInsertRowid);
+
+      let taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
+      const chosen: number[] = [];
+
+      for (let i = 0; i < randInt(3, 7); i++) {
+        const product = pick(products);
+        if (chosen.includes(product.id)) continue;
+        chosen.push(product.id);
+
+        // Top up an existing batch, which is what reordering actually does.
+        const batch = db.prepare(
+          'SELECT * FROM batches WHERE product_id = ? AND expiry >= ? ORDER BY expiry DESC LIMIT 1',
+        ).get(product.id, cm) as {
+          id: number; batch_no: string; expiry: string; mrp_paise: number;
+          purchase_rate_paise: number; qty_units: number;
+        } | undefined;
+        if (!batch) continue;
+
+        const qtyPacks = randInt(5, 30);
+        const freePacks = rand() > 0.8 ? 1 : 0;
+        const discountPct = pick([0, 0, 2.5, 5, 10]);
+
+        const gross = batch.purchase_rate_paise * qtyPacks;
+        const discountPaise = Math.round((gross * discountPct) / 100);
+        const taxablePaise = gross - discountPaise;
+        const tax = addExclusive(taxablePaise, product.gst_rate, isInterstate);
+
+        taxableTotal += taxablePaise;
+        cgstTotal += tax.cgst;
+        sgstTotal += tax.sgst;
+        igstTotal += tax.igst;
+
+        const addedUnits = (qtyPacks + freePacks) * product.pack_size;
+        const balance = batch.qty_units + addedUnits;
+        db.prepare('UPDATE batches SET qty_units = ? WHERE id = ?').run(balance, batch.id);
+
+        db.prepare(
+          `INSERT INTO purchase_items (purchase_id, product_id, batch_id, batch_no, expiry,
+             pack_size, qty_packs, free_packs, purchase_rate_paise, mrp_paise, sale_rate_paise,
+             discount_pct, gst_rate, taxable_paise, cgst_paise, sgst_paise, igst_paise, total_paise)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ).run(purchaseId, product.id, batch.id, batch.batch_no, batch.expiry, product.pack_size,
+          qtyPacks, freePacks, batch.purchase_rate_paise, batch.mrp_paise, batch.mrp_paise,
+          discountPct, product.gst_rate, taxablePaise, tax.cgst, tax.sgst, tax.igst, tax.total);
+
+        db.prepare(
+          `INSERT INTO stock_ledger (product_id, batch_id, txn_type, ref_table, ref_id,
+             qty_in, qty_out, balance_after, note, created_by, created_at)
+           VALUES (?,?,'PURCHASE','purchases',?,?,0,?,?,1,?)`,
+        ).run(product.id, batch.id, purchaseId, addedUnits, balance,
+          `${supplier.name} restock`, ts);
+      }
+
+      const { adjustment, total } = roundOff(taxableTotal + cgstTotal + sgstTotal + igstTotal);
+      db.prepare(
+        `UPDATE purchases SET taxable_paise=?, cgst_paise=?, sgst_paise=?, igst_paise=?,
+           round_off_paise=?, total_paise=? WHERE id=?`,
+      ).run(taxableTotal, cgstTotal, sgstTotal, igstTotal, adjustment, total, purchaseId);
+      invoices++;
+
+      // Older invoices are settled; recent ones sit within their credit period,
+      // so the outstanding report has something realistic to age.
+      if (daysAgo > supplier.credit_days && rand() > 0.25) {
+        const payDate = (db.prepare("SELECT date('now', ?, 'localtime') d")
+          .get(`-${Math.max(0, daysAgo - randInt(1, 10))} days`) as { d: string }).d;
+        const partial = rand() > 0.75;
+        const amount = partial ? Math.round(total * 0.6) : total;
+        if (amount > 0) {
+          const fy = financialYear(payDate);
+          const seq = nextCounter(db, `supplier_payment:${fy}`);
+          db.prepare(
+            `INSERT INTO supplier_payments (payment_no, payment_date, supplier_id, purchase_id,
+               amount_paise, mode, reference, notes, created_by, created_at)
+             VALUES (?,?,?,?,?,?,?,'',1,?)`,
+          ).run(`PAY/${fy}/${String(seq).padStart(5, '0')}`, payDate, supplier.id, purchaseId,
+            amount, pick(['BANK', 'UPI', 'CASH', 'CHEQUE']), `REF${randInt(10000, 99999)}`, ts);
+          payments++;
+        }
+      }
+    }
+
+    // One debit note: near-expiry stock going back to the distributor.
+    const candidate = db.prepare(
+      `SELECT b.*, p.name product_name, p.manufacturer, p.hsn_code, p.pack_size, p.gst_rate
+         FROM batches b JOIN products p ON p.id = b.product_id
+        WHERE b.qty_units > 0 AND b.supplier_id IS NOT NULL AND b.expiry <= ?
+        ORDER BY b.expiry LIMIT 1`,
+    ).get(addMonths(cm, 2)) as any;
+
+    if (candidate) {
+      const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?')
+        .get(candidate.supplier_id) as { id: number; name: string; state_code: string };
+      const isInterstate = supplier.state_code !== settings.state_code;
+      const returnDate = today();
+      const fy = financialYear(returnDate);
+      const seq = nextCounter(db, `purchase_return:${fy}`);
+      const returnNo = `DN/${fy}/${String(seq).padStart(5, '0')}`;
+      const ts = nowIso();
+      const qty = Math.min(candidate.qty_units, candidate.pack_size * 2);
+
+      const info = db.prepare(
+        `INSERT INTO purchase_returns (return_no, return_date, supplier_id, is_interstate,
+           reason, notes, created_by, created_at)
+         VALUES (?,?,?,?,'NEAR_EXPIRY','Returned for credit before expiry',1,?)`,
+      ).run(returnNo, returnDate, supplier.id, isInterstate ? 1 : 0, ts);
+      const returnId = Number(info.lastInsertRowid);
+
+      const taxablePaise = Math.round((candidate.purchase_rate_paise * qty) / candidate.pack_size);
+      const tax = addExclusive(taxablePaise, candidate.gst_rate, isInterstate);
+
+      db.prepare(
+        `INSERT INTO purchase_return_items (return_id, product_id, batch_id, product_name,
+           manufacturer, hsn_code, batch_no, expiry, pack_size, qty_units, rate_paise, mrp_paise,
+           gst_rate, taxable_paise, cgst_paise, sgst_paise, igst_paise, total_paise)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ).run(returnId, candidate.product_id, candidate.id, candidate.product_name,
+        candidate.manufacturer, candidate.hsn_code, candidate.batch_no, candidate.expiry,
+        candidate.pack_size, qty, candidate.purchase_rate_paise, candidate.mrp_paise,
+        candidate.gst_rate, taxablePaise, tax.cgst, tax.sgst, tax.igst, tax.total);
+
+      const balance = candidate.qty_units - qty;
+      db.prepare('UPDATE batches SET qty_units = ? WHERE id = ?').run(balance, candidate.id);
+      db.prepare(
+        `INSERT INTO stock_ledger (product_id, batch_id, txn_type, ref_table, ref_id,
+           qty_in, qty_out, balance_after, note, created_by, created_at)
+         VALUES (?,?,'PURCHASE_RETURN','purchase_returns',?,0,?,?,?,1,?)`,
+      ).run(candidate.product_id, candidate.id, returnId, qty, balance,
+        `${returnNo} to ${supplier.name}`, ts);
+
+      const { adjustment, total } = roundOff(tax.total);
+      db.prepare(
+        `UPDATE purchase_returns SET taxable_paise=?, cgst_paise=?, sgst_paise=?, igst_paise=?,
+           round_off_paise=?, total_paise=? WHERE id=?`,
+      ).run(taxablePaise, tax.cgst, tax.sgst, tax.igst, adjustment, total, returnId);
+    }
+  })();
+
+  const outstanding = db.prepare(
+    `SELECT COALESCE(SUM(p.total_paise), 0) - COALESCE((SELECT SUM(amount_paise)
+       FROM supplier_payments), 0) AS due FROM purchases p`,
+  ).get() as { due: number };
+
+  console.log(`  ${invoices} purchase invoices, ${payments} supplier payments, 1 debit note`);
+  console.log(`  supplier outstanding: Rs ${(outstanding.due / 100).toFixed(2)}`);
 }
 
 main();

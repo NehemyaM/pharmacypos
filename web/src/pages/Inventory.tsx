@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, type SessionUser } from '../lib/api';
 import { rupees, formatExpiry, monthsToExpiry, formatQty, scheduleClass, formatDate } from '../lib/format';
-import { Alert, Spinner, Modal, EmptyState, PageHeader } from '../components/ui';
+import { Alert, Spinner, Modal, EmptyState, PageHeader, ExportButton } from '../components/ui';
 
 type StockRow = {
   id: number; batch_no: string; expiry: string; mrp_paise: number;
@@ -61,6 +61,7 @@ export default function Inventory({ user }: { user: SessionUser }) {
       <PageHeader
         title="Stock"
         subtitle="Batch-wise stock on hand, valued at cost and at MRP"
+        actions={<ExportButton path="/exports/stock" filename="stock-on-hand.csv" />}
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">

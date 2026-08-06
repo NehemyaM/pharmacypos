@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { downloadFile } from '../lib/api';
 
 export function Spinner({ className = '' }: { className?: string }) {
   return (
@@ -101,6 +102,46 @@ export function useAutoFocus<T extends HTMLElement>(active = true) {
     if (active) ref.current?.focus();
   }, [active]);
   return ref;
+}
+
+/**
+ * Downloads a report as CSV. The file opens in Excel or Google Sheets with the
+ * amounts as real numbers, so the shop's accountant can total a column.
+ */
+export function ExportButton({ path, filename, label = 'Export CSV', className }: {
+  path: string;
+  filename: string;
+  label?: string;
+  className?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function go() {
+    setBusy(true);
+    setError('');
+    try {
+      await downloadFile(path, filename);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex flex-col items-end">
+      <button
+        className={className ?? 'btn-secondary'}
+        onClick={() => void go()}
+        disabled={busy}
+        title="Download as a spreadsheet"
+      >
+        {busy ? <Spinner /> : <span aria-hidden>⭳</span>} {label}
+      </button>
+      {error && <span className="mt-1 text-xs text-red-600">{error}</span>}
+    </span>
+  );
 }
 
 export function PageHeader({ title, subtitle, actions }: {
