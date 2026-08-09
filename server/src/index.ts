@@ -16,6 +16,8 @@ import { exportsRouter } from './routes/exports.js';
 import { backupRouter } from './routes/backup.js';
 import { purchaseReturnsRouter } from './routes/purchase-returns.js';
 import { supplierLedgerRouter } from './routes/supplier-ledger.js';
+import { heldBillsRouter } from './routes/held-bills.js';
+import { customerLedgerRouter } from './routes/customer-ledger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 4000;
@@ -45,6 +47,8 @@ app.use('/api/exports', exportsRouter);
 app.use('/api/backup', backupRouter);
 app.use('/api/purchase-returns', purchaseReturnsRouter);
 app.use('/api/supplier-ledger', supplierLedgerRouter);
+app.use('/api/held-bills', heldBillsRouter);
+app.use('/api/customer-ledger', customerLedgerRouter);
 
 // Serve the built front-end when it exists, so the shop runs one process.
 const webDist = resolve(__dirname, '../../web/dist');

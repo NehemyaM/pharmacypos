@@ -142,6 +142,7 @@ function wipe(): void {
   // --force reseed and collides with the new data on a unique key.
   const tables = [
     'h1_register', 'sale_return_items', 'sale_returns', 'sale_items', 'sales',
+    'customer_receipts', 'held_bills',
     'purchase_return_items', 'purchase_returns', 'supplier_payments',
     'purchase_items', 'purchases', 'stock_ledger', 'stock_adjustments', 'batches',
     'products', 'customers', 'doctors', 'suppliers', 'audit_log', 'counters',
@@ -235,9 +236,14 @@ function main(): void {
       ).run(d.name, d.qual, d.reg, d.hospital, d.address, d.phone, ts);
     }
     for (const c of CUSTOMERS) {
+      // A couple of regulars run a monthly account — the clinic and one chronic
+      // patient — so the dues screen has something realistic to show.
+      const limit = c.name === 'Sri Sai Clinic' ? 2500000
+        : c.name === 'Ramesh Kumar' ? 500000 : 0;
       db.prepare(
-        `INSERT INTO customers (name, phone, address, city, gstin, created_at) VALUES (?,?,?,?,?,?)`,
-      ).run(c.name, c.phone, c.address, c.city, (c as { gstin?: string }).gstin ?? '', ts);
+        `INSERT INTO customers (name, phone, address, city, gstin, credit_limit, created_at)
+         VALUES (?,?,?,?,?,?,?)`,
+      ).run(c.name, c.phone, c.address, c.city, (c as { gstin?: string }).gstin ?? '', limit, ts);
     }
 
     // ---- Products ---------------------------------------------------------
@@ -328,7 +334,7 @@ function seedSalesHistory(): void {
        FROM products p WHERE p.active = 1`,
   ).all() as Array<Record<string, number | string>>;
   const inStock = products.filter((p) => Number(p.nb) > 0);
-  const customers = db.prepare('SELECT * FROM customers').all() as Array<{ id: number; name: string; phone: string; gstin: string }>;
+  const customers = db.prepare('SELECT * FROM customers').all() as Array<{ id: number; name: string; phone: string; gstin: string; credit_limit: number }>;
   const doctors = db.prepare('SELECT * FROM doctors').all() as Array<{ id: number; name: string; address: string; reg_no: string }>;
 
   let bills = 0;
@@ -398,7 +404,13 @@ function seedSalesHistory(): void {
         const fy = financialYear(invoiceDay);
         const seq = nextCounter(db, `invoice:${fy}`);
         const invoiceNo = `INV/${fy}/${String(seq).padStart(5, '0')}`;
-        const paymentMode = pick(['CASH', 'CASH', 'CASH', 'UPI', 'UPI', 'CARD']);
+        // Account customers sometimes buy on credit; everyone else pays at the
+        // counter. paid_paise is what actually crossed the counter, so a credit
+        // bill records zero and shows up as a due.
+        const onAccount = !!customer && customer.credit_limit > 0 && rand() > 0.45;
+        const paymentMode = onAccount
+          ? 'CREDIT'
+          : pick(['CASH', 'CASH', 'CASH', 'UPI', 'UPI', 'CARD']);
         const servedBy = needsH1 ? pick([1, 2]) : pick([1, 2, 3]);
         const pharmacistName = servedBy === 1 ? 'B. Sai Krishna' : servedBy === 2 ? 'K. Deepika' : 'B. Sai Krishna';
         const patientName = customer?.name ?? pick(['Walk-in Patient', 'Ravi', 'Sita', 'Imran', 'Padma']);
@@ -416,7 +428,7 @@ function seedSalesHistory(): void {
           needsRx ? `RX${randInt(1000, 9999)}` : '',
           needsH1 ? patientName : '',
           needsH1 ? (customer?.name ? 'Hyderabad' : 'Habsiguda, Hyderabad') : '',
-          gross, discount, taxable, cgst, sgst, adjustment, total, total,
+          gross, discount, taxable, cgst, sgst, adjustment, total, onAccount ? 0 : total,
           paymentMode, servedBy, pharmacistName, invoiceDate,
         );
         const saleId = Number(saleInfo.lastInsertRowid);
@@ -466,6 +478,50 @@ function seedSalesHistory(): void {
 
   const h1 = db.prepare('SELECT COUNT(*) c FROM h1_register').get() as { c: number };
   console.log(`  ${bills} historical bills over 31 days, ${h1.c} Schedule H1 register entries`);
+
+  // Account customers settle some of what they owe, so the dues screen shows a
+  // realistic mix of settled, part-paid and still-outstanding bills.
+  let receipts = 0;
+  db.transaction(() => {
+    const credit = db.prepare(
+      `SELECT id, customer_id, invoice_date, total_paise FROM sales
+        WHERE payment_mode = 'CREDIT' AND status = 'COMPLETED' AND total_paise > paid_paise
+        ORDER BY invoice_date`,
+    ).all() as Array<{ id: number; customer_id: number; invoice_date: string; total_paise: number }>;
+
+    for (const bill of credit) {
+      // Older bills are more likely to have been settled.
+      if (rand() > 0.55) continue;
+      const partial = rand() > 0.7;
+      const amount = partial ? Math.round(bill.total_paise * 0.5) : bill.total_paise;
+      if (amount <= 0) continue;
+
+      const date = bill.invoice_date.slice(0, 10);
+      const fy = financialYear(date);
+      const seq = nextCounter(db, `customer_receipt:${fy}`);
+      db.prepare(
+        `INSERT INTO customer_receipts (receipt_no, receipt_date, customer_id, sale_id,
+           amount_paise, mode, reference, notes, created_by, created_at)
+         VALUES (?,?,?,?,?,?,'','',1,?)`,
+      ).run(`RCT/${fy}/${String(seq).padStart(5, '0')}`, date, bill.customer_id, bill.id,
+        amount, pick(['CASH', 'UPI', 'BANK']), ts);
+      receipts++;
+    }
+  })();
+
+  const due = db.prepare(
+    `SELECT COALESCE(SUM(s.total_paise - s.paid_paise), 0)
+            - COALESCE((SELECT SUM(amount_paise) FROM customer_receipts), 0) AS owed
+       FROM sales s WHERE s.status = 'COMPLETED'`,
+  ).get() as { owed: number };
+  console.log(`  ${credit_count()} credit bills, ${receipts} customer receipts`);
+  console.log(`  customers owe: Rs ${(due.owed / 100).toFixed(2)}`);
+}
+
+function credit_count(): number {
+  return (db.prepare(
+    "SELECT COUNT(*) c FROM sales WHERE payment_mode = 'CREDIT' AND status = 'COMPLETED'",
+  ).get() as { c: number }).c;
 }
 
 /**

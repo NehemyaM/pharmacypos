@@ -10,7 +10,8 @@ type ProductHit = {
   id: number; name: string; generic_name: string; manufacturer: string;
   schedule_type: string; gst_rate: number; hsn_code: string; unit: string;
   pack_size: number; pack_label: string; rack: string; allow_loose: number;
-  stock_units: number; nearest_expiry: string | null; mrp_paise: number | null;
+  // Present on search results, absent when a single product is fetched by id.
+  stock_units?: number; nearest_expiry?: string | null; mrp_paise?: number | null;
 };
 
 type BatchOption = {
@@ -20,6 +21,16 @@ type BatchOption = {
 
 type Doctor = { id: number; name: string; qualification: string; hospital: string; address: string };
 type Customer = { id: number; name: string; phone: string; address: string; gstin: string };
+
+type HeldBill = {
+  id: number; label: string; item_count: number; total_paise: number;
+  created_at: string; held_by_name: string | null;
+};
+
+type CreditBalance = {
+  customer_id: number; name: string; credit_limit_paise: number;
+  outstanding_paise: number; available_paise: number | null; over_limit: boolean;
+};
 
 type CartLine = {
   key: string;
@@ -59,15 +70,36 @@ export default function Billing({ user }: { user: SessionUser }) {
   const [billDiscountPct, setBillDiscountPct] = useState(0);
 
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const [saving, setSaving] = useState(false);
   const [batchPickerFor, setBatchPickerFor] = useState<string | null>(null);
+
+  const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
+  const [showHeld, setShowHeld] = useState(false);
+  const [holdPrompt, setHoldPrompt] = useState(false);
+  const [balance, setBalance] = useState<CreditBalance | null>(null);
 
   const searchRef = useAutoFocus<HTMLInputElement>();
   const resultsRef = useRef<HTMLDivElement>(null);
 
+  const loadHeld = useCallback(() => {
+    api.get<HeldBill[]>('/held-bills').then(setHeldBills).catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     api.get<Doctor[]>('/doctors').then(setDoctors).catch(() => undefined);
-  }, []);
+    loadHeld();
+  }, [loadHeld]);
+
+  // What this customer already owes, so the counter sees it before extending more.
+  useEffect(() => {
+    if (!customerId) {
+      setBalance(null);
+      return;
+    }
+    api.get<CreditBalance>(`/customer-ledger/balance/${customerId}`)
+      .then(setBalance).catch(() => setBalance(null));
+  }, [customerId]);
 
   // ---- Product search (debounced) -----------------------------------------
   useEffect(() => {
@@ -252,6 +284,116 @@ export default function Billing({ user }: { user: SessionUser }) {
     doctorId, prescriptionNo, patientName, patientAddress, paymentMode, paymentRef,
     billDiscountPct, lines, navigate]);
 
+  function resetCart() {
+    setLines([]);
+    setCustomerId(null);
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerGstin('');
+    setDoctorId(null);
+    setPrescriptionNo('');
+    setPatientName('');
+    setPatientAddress('');
+    setPaymentMode('CASH');
+    setPaymentRef('');
+    setBillDiscountPct(0);
+    setError('');
+    setWarning('');
+  }
+
+  /** Park the basket so the counter can serve the next customer. */
+  const holdBill = useCallback(async (label: string) => {
+    if (lines.length === 0) return;
+    setError('');
+    try {
+      await api.post('/held-bills', {
+        label,
+        total_paise: totals.total,
+        cart: {
+          customer_id: customerId,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          customer_gstin: customerGstin,
+          doctor_id: doctorId,
+          prescription_no: prescriptionNo,
+          patient_name: patientName,
+          patient_address: patientAddress,
+          payment_mode: paymentMode,
+          overall_discount_pct: billDiscountPct,
+          items: lines.map((l) => ({
+            product_id: l.product.id,
+            batch_id: l.batch.id,
+            qty_units: l.qtyUnits,
+            discount_pct: l.discountPct,
+          })),
+        },
+      });
+      resetCart();
+      loadHeld();
+      setHoldPrompt(false);
+      searchRef.current?.focus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not hold the bill');
+    }
+  }, [lines, totals.total, customerId, customerName, customerPhone, customerGstin,
+    doctorId, prescriptionNo, patientName, patientAddress, paymentMode, billDiscountPct,
+    loadHeld, searchRef]);
+
+  /**
+   * Resume a held bill. Stock was never reserved, so the server re-checks every
+   * line and tells us what changed while the bill was parked.
+   */
+  async function resumeBill(id: number) {
+    setError('');
+    setWarning('');
+    try {
+      const held = await api.get<{
+        cart: any; warnings: string[];
+      }>(`/held-bills/${id}`);
+
+      const rebuilt: CartLine[] = [];
+      for (const item of held.cart.items) {
+        const [product, batches] = await Promise.all([
+          api.get<ProductHit>(`/products/${item.product_id}`),
+          api.get<BatchOption[]>(`/products/${item.product_id}/batches`),
+        ]);
+        const batch = batches.find((b) => b.id === item.batch_id);
+        if (!batch) continue;
+        rebuilt.push({
+          key: `${item.product_id}-${item.batch_id}-${Date.now()}-${rebuilt.length}`,
+          product, batch, batches,
+          qtyUnits: item.qty_units,
+          discountPct: item.discount_pct ?? 0,
+        });
+      }
+
+      setLines(rebuilt);
+      setCustomerId(held.cart.customer_id ?? null);
+      setCustomerName(held.cart.customer_name ?? '');
+      setCustomerPhone(held.cart.customer_phone ?? '');
+      setCustomerGstin(held.cart.customer_gstin ?? '');
+      setDoctorId(held.cart.doctor_id ?? null);
+      setPrescriptionNo(held.cart.prescription_no ?? '');
+      setPatientName(held.cart.patient_name ?? '');
+      setPatientAddress(held.cart.patient_address ?? '');
+      setPaymentMode(held.cart.payment_mode ?? 'CASH');
+      setBillDiscountPct(held.cart.overall_discount_pct ?? 0);
+
+      if (held.warnings.length > 0) setWarning(held.warnings.join(' · '));
+      if (rebuilt.length === 0) {
+        setError('Nothing on that held bill is still available to sell.');
+      }
+
+      // The bill is now on screen, so it must not also remain in the tray —
+      // otherwise the same basket can be resumed twice and billed twice.
+      await api.del(`/held-bills/${id}`);
+      loadHeld();
+      setShowHeld(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resume that bill');
+    }
+  }
+
   // ---- Global shortcuts ---------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -261,6 +403,13 @@ export default function Billing({ user }: { user: SessionUser }) {
       } else if (e.key === 'F8') {
         e.preventDefault();
         void save(false);
+      } else if (e.key === 'F6') {
+        e.preventDefault();
+        if (lines.length > 0) setHoldPrompt(true);
+        else setShowHeld(true);
+      } else if (e.key === 'F7') {
+        e.preventDefault();
+        setShowHeld(true);
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         searchRef.current?.focus();
@@ -268,7 +417,7 @@ export default function Billing({ user }: { user: SessionUser }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [save, searchRef]);
+  }, [save, searchRef, lines.length]);
 
   const pickerLine = lines.find((l) => l.key === batchPickerFor);
 
@@ -279,13 +428,32 @@ export default function Billing({ user }: { user: SessionUser }) {
           <h1 className="text-lg font-semibold text-slate-800">New Bill</h1>
           <span className="text-xs text-slate-400">
             <span className="kbd">Ctrl</span>+<span className="kbd">K</span> search ·
+            <span className="kbd ml-1">F6</span> hold ·
             <span className="kbd ml-1">F8</span> save ·
             <span className="kbd ml-1">F9</span> save &amp; print
           </span>
         </div>
-        <div className="text-right">
-          <p className="text-xs uppercase tracking-wide text-slate-400">Payable</p>
-          <p className="text-xl font-bold tabular text-slate-900">{rupees(totals.total)}</p>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowHeld(true)}
+            className={`relative rounded-lg border px-3 py-1.5 text-sm font-medium ${
+              heldBills.length > 0
+                ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+            title="Bills parked for later (F7)"
+          >
+            Held bills
+            {heldBills.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-xs font-bold text-white">
+                {heldBills.length}
+              </span>
+            )}
+          </button>
+          <div className="text-right">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Payable</p>
+            <p className="text-xl font-bold tabular text-slate-900">{rupees(totals.total)}</p>
+          </div>
         </div>
       </header>
 
@@ -463,6 +631,23 @@ export default function Billing({ user }: { user: SessionUser }) {
         <aside className="flex w-96 shrink-0 flex-col overflow-y-auto bg-white">
           <div className="space-y-4 p-4">
             {error && <Alert kind="error" onDismiss={() => setError('')}>{error}</Alert>}
+            {warning && <Alert kind="warning" onDismiss={() => setWarning('')}>{warning}</Alert>}
+
+            {/* What this customer already owes, before more credit is extended */}
+            {balance && balance.outstanding_paise > 0 && (
+              <Alert kind={balance.over_limit ? 'error' : 'warning'}>
+                <p className="font-semibold">
+                  {balance.name} owes {rupees(balance.outstanding_paise)}
+                </p>
+                <p className="mt-0.5 text-xs">
+                  {balance.credit_limit_paise > 0 ? (
+                    balance.over_limit
+                      ? `Already past their ${rupees(balance.credit_limit_paise)} limit — no further credit.`
+                      : `${rupees(balance.available_paise ?? 0)} of their ${rupees(balance.credit_limit_paise)} limit still available.`
+                  ) : 'No credit limit set for this customer.'}
+                </p>
+              </Alert>
+            )}
 
             {needsH1 && (
               <Alert kind="warning">
@@ -628,23 +813,107 @@ export default function Billing({ user }: { user: SessionUser }) {
               </ul>
             )}
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="mt-3 space-y-2">
               <button
-                className="btn-secondary" disabled={blockers.length > 0 || saving}
-                onClick={() => void save(false)}
+                className="btn-secondary w-full" disabled={lines.length === 0 || saving}
+                onClick={() => setHoldPrompt(true)}
+                title="Park this bill and serve the next customer"
               >
-                {saving && <Spinner />} Save <span className="kbd">F8</span>
+                Hold bill <span className="kbd">F6</span>
               </button>
-              <button
-                className="btn-primary" disabled={blockers.length > 0 || saving}
-                onClick={() => void save(true)}
-              >
-                Save &amp; Print <span className="kbd">F9</span>
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="btn-secondary" disabled={blockers.length > 0 || saving}
+                  onClick={() => void save(false)}
+                >
+                  {saving && <Spinner />} Save <span className="kbd">F8</span>
+                </button>
+                <button
+                  className="btn-primary" disabled={blockers.length > 0 || saving}
+                  onClick={() => void save(true)}
+                >
+                  Save &amp; Print <span className="kbd">F9</span>
+                </button>
+              </div>
             </div>
           </div>
         </aside>
       </div>
+
+      {/* Name the held bill so the counter can find it again */}
+      <HoldPrompt
+        open={holdPrompt}
+        onClose={() => setHoldPrompt(false)}
+        suggestion={customerName || patientName || customerPhone}
+        itemCount={lines.length}
+        total={totals.total}
+        onHold={(label) => void holdBill(label)}
+      />
+
+      {/* Held bills tray */}
+      <Modal open={showHeld} onClose={() => setShowHeld(false)} title="Held bills" width="max-w-2xl">
+        {heldBills.length === 0 ? (
+          <div className="py-8 text-center">
+            <p className="text-sm text-slate-500">Nothing is on hold.</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Press <span className="kbd">F6</span> during a sale to park it here.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              Held bills do not reserve stock. If a batch sells out meanwhile, the quantity is
+              adjusted when you resume and you will be told what changed.
+            </p>
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="th">Name</th>
+                  <th className="th">Held</th>
+                  <th className="th text-right">Items</th>
+                  <th className="th text-right">Value</th>
+                  <th className="th"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {heldBills.map((h) => (
+                  <tr key={h.id}>
+                    <td className="td font-medium">{h.label}</td>
+                    <td className="td text-xs text-slate-500">
+                      {h.created_at.slice(11, 16)}
+                      {h.held_by_name && <span className="block">{h.held_by_name}</span>}
+                    </td>
+                    <td className="td text-right tabular">{h.item_count}</td>
+                    <td className="td text-right tabular">{rupees(h.total_paise)}</td>
+                    <td className="td whitespace-nowrap text-right">
+                      <button
+                        className="btn-primary !px-2 !py-1 text-xs"
+                        onClick={() => void resumeBill(h.id)}
+                        disabled={lines.length > 0}
+                        title={lines.length > 0 ? 'Finish or hold the current bill first' : ''}
+                      >
+                        Resume
+                      </button>
+                      <button
+                        className="ml-2 text-xs text-slate-400 hover:text-red-600"
+                        onClick={() => void api.del(`/held-bills/${h.id}`).then(loadHeld)}
+                        title="Discard"
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {lines.length > 0 && (
+              <p className="text-xs text-amber-700">
+                Finish or hold the bill on screen before resuming another.
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* Batch picker */}
       <Modal
@@ -719,6 +988,51 @@ function Row({ label, value, muted, tone }: {
         {value}
       </dd>
     </div>
+  );
+}
+
+function HoldPrompt({ open, onClose, suggestion, itemCount, total, onHold }: {
+  open: boolean;
+  onClose: () => void;
+  suggestion: string;
+  itemCount: number;
+  total: number;
+  onHold: (label: string) => void;
+}) {
+  const [label, setLabel] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setLabel(suggestion);
+      setTimeout(() => inputRef.current?.select(), 50);
+    }
+  }, [open, suggestion]);
+
+  return (
+    <Modal open={open} onClose={onClose} title="Hold this bill">
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          {itemCount} item{itemCount === 1 ? '' : 's'} worth {rupees(total)} will be parked.
+          Stock is <strong>not</strong> reserved.
+        </p>
+        <div>
+          <label className="label" htmlFor="hold-label">Name it so you can find it</label>
+          <input
+            id="hold-label" ref={inputRef} className="input" value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && label.trim()) onHold(label.trim()); }}
+            placeholder="e.g. Ramesh — gone to ATM"
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={!label.trim()} onClick={() => onHold(label.trim())}>
+            Hold bill
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

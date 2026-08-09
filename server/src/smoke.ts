@@ -75,7 +75,18 @@ async function main(): Promise<void> {
 
   // ---- Find test fixtures -------------------------------------------------
   const all = await api('/products?limit=200&inStock=true', { token: admin });
-  const otc = all.data.find((p: any) => p.schedule_type === 'OTC' && p.stock_units > 30);
+  // The OTC fixture is used to assert single-batch stock movement, so its
+  // earliest-expiring batch must hold enough on its own — a product with 30 in
+  // stock spread thinly would have FEFO split the line across two batches and
+  // the assertions below would be measuring the wrong thing.
+  let otc: any = null;
+  for (const candidate of all.data.filter((p: any) => p.schedule_type === 'OTC' && p.stock_units > 30)) {
+    const b = await api(`/products/${candidate.id}/batches`, { token: admin });
+    if (b.data[0]?.qty_units >= 20) {
+      otc = candidate;
+      break;
+    }
+  }
   const scheduleH = all.data.find((p: any) => p.schedule_type === 'H' && p.stock_units > 30);
   const scheduleH1 = all.data.find((p: any) => p.schedule_type === 'H1' && p.stock_units > 20);
   check('found an OTC, an H and an H1 product to test with',

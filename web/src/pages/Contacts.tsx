@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
-import { rupees, formatDate } from '../lib/format';
-import { Alert, Spinner, Modal, EmptyState, PageHeader } from '../components/ui';
+import { rupees, formatDate, rupeesInput, paiseFromInput } from '../lib/format';
+import { Alert, Spinner, Modal, EmptyState, PageHeader, Tile } from '../components/ui';
 
-type Tab = 'customers' | 'doctors' | 'suppliers';
+type Tab = 'customers' | 'dues' | 'doctors' | 'suppliers';
 
 type Customer = {
   id: number; name: string; phone: string; email: string; address: string;
@@ -27,22 +27,24 @@ export default function Contacts() {
       <PageHeader title="Contacts" subtitle="Customers, prescribers and distributors" />
 
       <div className="mb-4 flex gap-2">
-        {(['customers', 'doctors', 'suppliers'] as Tab[]).map((t) => (
+        {([['customers', 'Customers'], ['dues', 'Customer dues'],
+          ['doctors', 'Doctors'], ['suppliers', 'Suppliers']] as const).map(([t, label]) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`rounded-lg border px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
+            className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
               tab === t
                 ? 'border-brand-500 bg-brand-50 text-brand-800'
                 : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
             }`}
           >
-            {t}
+            {label}
           </button>
         ))}
       </div>
 
       {tab === 'customers' && <Customers />}
+      {tab === 'dues' && <CustomerDues />}
       {tab === 'doctors' && <Doctors />}
       {tab === 'suppliers' && <Suppliers />}
     </div>
@@ -552,4 +554,310 @@ function SupplierForm({ target, onClose, onSaved }: {
 
 function Loading() {
   return <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-slate-400" /></div>;
+}
+
+// ===========================================================================
+// Customer dues — money the shop is owed
+// ===========================================================================
+
+type Due = {
+  id: number; name: string; phone: string; address: string; credit_limit: number;
+  credit_bills: number; billed_paise: number; collected_paise: number;
+  receipts_paise: number; credit_note_paise: number; outstanding_paise: number;
+  oldest_unpaid: string | null; oldest_days: number | null;
+};
+
+function CustomerDues() {
+  const [data, setData] = useState<{ rows: Due[]; totals: any } | null>(null);
+  const [error, setError] = useState('');
+  const [statementFor, setStatementFor] = useState<Due | null>(null);
+  const [receiptFor, setReceiptFor] = useState<Due | null>(null);
+
+  function load() {
+    api.get<{ rows: Due[]; totals: any }>('/customer-ledger/outstanding')
+      .then(setData).catch((e) => setError(e.message));
+  }
+  useEffect(load, []);
+
+  if (error) return <Alert kind="error">{error}</Alert>;
+  if (!data) return <Loading />;
+
+  return (
+    <>
+      <div className="mb-4 grid gap-4 sm:grid-cols-3">
+        <Tile label="Owed to you" value={rupees(data.totals.outstanding_paise)}
+          tone={data.totals.outstanding_paise > 0 ? 'warn' : 'good'} />
+        <Tile label="Customers with dues" value={data.totals.customers} />
+        <Tile label="Over their limit" value={data.totals.over_limit}
+          tone={data.totals.over_limit > 0 ? 'bad' : 'good'}
+          sub={data.totals.over_limit > 0 ? 'No further credit until paid' : 'All within limit'} />
+      </div>
+
+      <div className="card overflow-hidden">
+        {data.rows.length === 0 ? (
+          <EmptyState title="Nobody owes you anything" icon="✅"
+            hint="Credit bills appear here until the money is received." />
+        ) : (
+          <table className="w-full">
+            <thead className="border-b border-slate-200 bg-slate-50">
+              <tr>
+                <th className="th">Customer</th>
+                <th className="th text-right">Bills</th>
+                <th className="th text-right">Billed</th>
+                <th className="th text-right">Received</th>
+                <th className="th text-right">Outstanding</th>
+                <th className="th text-right">Limit</th>
+                <th className="th">Oldest</th>
+                <th className="th"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.rows.map((c) => {
+                const overLimit = c.credit_limit > 0 && c.outstanding_paise > c.credit_limit;
+                return (
+                  <tr key={c.id} className={overLimit ? 'bg-red-50' : ''}>
+                    <td className="td">
+                      <span className="font-medium text-slate-800">{c.name}</span>
+                      {c.phone && <span className="block text-xs text-slate-400">{c.phone}</span>}
+                    </td>
+                    <td className="td text-right tabular">{c.credit_bills}</td>
+                    <td className="td text-right tabular">{rupees(c.billed_paise)}</td>
+                    <td className="td text-right tabular text-emerald-700">
+                      {rupees(c.collected_paise + c.receipts_paise)}
+                    </td>
+                    <td className={`td text-right font-semibold tabular ${
+                      overLimit ? 'text-red-700' : 'text-amber-700'
+                    }`}>
+                      {rupees(c.outstanding_paise)}
+                    </td>
+                    <td className="td text-right tabular text-slate-500">
+                      {c.credit_limit > 0 ? rupees(c.credit_limit) : '—'}
+                      {overLimit && (
+                        <span className="block text-[11px] font-semibold text-red-600">over limit</span>
+                      )}
+                    </td>
+                    <td className="td text-xs">
+                      {c.oldest_unpaid ? (
+                        <>
+                          {formatDate(c.oldest_unpaid)}
+                          {c.oldest_days !== null && c.oldest_days > 30 && (
+                            <span className="block font-semibold text-red-600">
+                              {c.oldest_days} days
+                            </span>
+                          )}
+                        </>
+                      ) : '—'}
+                    </td>
+                    <td className="td whitespace-nowrap text-right">
+                      <button className="text-xs text-slate-500 hover:text-brand-700 hover:underline"
+                        onClick={() => setStatementFor(c)}>Statement</button>
+                      <button className="ml-3 text-xs font-medium text-brand-700 hover:underline"
+                        onClick={() => setReceiptFor(c)}>Receive</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {statementFor && (
+        <CustomerStatement customer={statementFor} onClose={() => setStatementFor(null)} />
+      )}
+      {receiptFor && (
+        <ReceiptModal customer={receiptFor} onClose={() => setReceiptFor(null)}
+          onSaved={() => { setReceiptFor(null); load(); }} />
+      )}
+    </>
+  );
+}
+
+function CustomerStatement({ customer, onClose }: { customer: Due; onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    api.get(`/customer-ledger/statement/${customer.id}`).then(setData).catch(() => setData(null));
+  }, [customer.id]);
+
+  return (
+    <Modal open onClose={onClose} width="max-w-3xl" title={`Statement — ${customer.name}`}>
+      {!data ? <Loading /> : (
+        <div className="space-y-5">
+          <p className="text-sm text-slate-600">
+            Currently owes <strong className="tabular">{rupees(data.outstanding_paise)}</strong>
+          </p>
+
+          <div>
+            <h3 className="mb-2 text-sm font-semibold text-slate-700">Bills</h3>
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="th">Invoice</th>
+                  <th className="th">Date</th>
+                  <th className="th text-right">Total</th>
+                  <th className="th text-right">Paid</th>
+                  <th className="th text-right">Due</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {data.bills.map((b: any) => (
+                  <tr key={b.id} className={b.due_paise > 0 && b.age_days > 30 ? 'bg-red-50' : ''}>
+                    <td className="td font-mono text-xs">{b.invoice_no}</td>
+                    <td className="td">
+                      {formatDate(b.invoice_date)}
+                      {b.due_paise > 0 && b.age_days > 30 && (
+                        <span className="block text-[11px] font-semibold text-red-600">
+                          {b.age_days} days old
+                        </span>
+                      )}
+                    </td>
+                    <td className="td text-right tabular">{rupees(b.total_paise)}</td>
+                    <td className="td text-right tabular text-emerald-700">
+                      {rupees(b.paid_paise + b.receipts_paise)}
+                    </td>
+                    <td className={`td text-right tabular ${b.due_paise > 0 ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>
+                      {b.due_paise > 0 ? rupees(b.due_paise) : 'Settled'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {data.receipts.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-slate-700">Receipts</h3>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="th">Receipt</th>
+                    <th className="th">Date</th>
+                    <th className="th">Against</th>
+                    <th className="th">Mode</th>
+                    <th className="th text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.receipts.map((r: any) => (
+                    <tr key={r.id}>
+                      <td className="td font-mono text-xs">{r.receipt_no}</td>
+                      <td className="td">{formatDate(r.receipt_date)}</td>
+                      <td className="td text-xs">{r.invoice_no ?? 'On account'}</td>
+                      <td className="td text-xs">
+                        {r.mode}
+                        {r.reference === 'WRITE-OFF' && (
+                          <span className="chip ml-1 border-red-200 bg-red-50 text-red-700">
+                            written off
+                          </span>
+                        )}
+                      </td>
+                      <td className="td text-right font-medium tabular">{rupees(r.amount_paise)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function ReceiptModal({ customer, onClose, onSaved }: {
+  customer: Due; onClose: () => void; onSaved: () => void;
+}) {
+  const [bills, setBills] = useState<any[]>([]);
+  const [saleId, setSaleId] = useState<number | null>(null);
+  const [amount, setAmount] = useState(rupeesInput(customer.outstanding_paise));
+  const [mode, setMode] = useState('CASH');
+  const [reference, setReference] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get<any>(`/customer-ledger/statement/${customer.id}`)
+      .then((d) => setBills(d.bills.filter((b: any) => b.due_paise > 0)))
+      .catch(() => setBills([]));
+  }, [customer.id]);
+
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/customer-ledger/receipts', {
+        customer_id: customer.id,
+        sale_id: saleId,
+        amount_paise: paiseFromInput(amount),
+        mode, reference,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not record the receipt');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Receive payment — ${customer.name}`}>
+      <div className="space-y-3">
+        {error && <Alert kind="error">{error}</Alert>}
+        <p className="text-sm text-slate-600">
+          Owes <strong className="tabular">{rupees(customer.outstanding_paise)}</strong>
+          {' '}across {customer.credit_bills} bill{customer.credit_bills === 1 ? '' : 's'}
+        </p>
+
+        <div>
+          <label className="label">Against which bill</label>
+          <select className="input" value={saleId ?? ''}
+            onChange={(e) => {
+              const id = Number(e.target.value) || null;
+              setSaleId(id);
+              const b = bills.find((x) => x.id === id);
+              setAmount(rupeesInput(b ? b.due_paise : customer.outstanding_paise));
+            }}>
+            <option value="">Oldest first (on account)</option>
+            {bills.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.invoice_no} — {formatDate(b.invoice_date)} — due {rupees(b.due_paise)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Amount (₹)</label>
+            <input className="input tabular text-right" value={amount}
+              onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Mode</label>
+            <select className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="CASH">Cash</option>
+              <option value="UPI">UPI</option>
+              <option value="CARD">Card</option>
+              <option value="BANK">Bank transfer</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Reference</label>
+          <input className="input" value={reference} onChange={(e) => setReference(e.target.value)}
+            placeholder="UPI reference or cheque number" />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={paiseFromInput(amount) <= 0 || busy}
+            onClick={() => void submit()}>
+            {busy && <Spinner />} Record receipt
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
 }

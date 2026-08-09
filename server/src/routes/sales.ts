@@ -4,8 +4,9 @@ import { getDb, nowIso, today, currentMonth, nextCounter, financialYear } from '
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { computeLine, allocateFefo, InsufficientStockError, requiresH1Register, requiresPrescription } from '../lib/billing.js';
 import { isInterstateSupply, isValidGstin } from '../lib/gst.js';
-import { roundOff } from '../lib/money.js';
+import { roundOff, formatRupees as rupees } from '../lib/money.js';
 import { audit } from '../lib/audit.js';
+import { customerOutstandingPaise } from './customer-ledger.js';
 import type { Settings, Product, Batch, Sale, SaleItem } from '../types.js';
 
 export const salesRouter = Router();
@@ -168,6 +169,30 @@ salesRouter.post('/', (req, res) => {
       const { adjustment, total } = settings.round_off_enabled
         ? roundOff(beforeRounding)
         : { adjustment: 0, total: beforeRounding };
+
+      // ---- Credit control ---------------------------------------------------
+      // A credit sale adds to what the customer already owes. Selling past an
+      // agreed limit is how a shop ends up chasing money it will never collect,
+      // so the limit is enforced here rather than merely displayed.
+      if (d.payment_mode === 'CREDIT') {
+        if (!d.customer_id) {
+          throw new HttpError(400,
+            'A credit sale needs a named customer — a cash customer cannot be given credit');
+        }
+        const customer = db.prepare('SELECT name, credit_limit FROM customers WHERE id = ?')
+          .get(d.customer_id) as { name: string; credit_limit: number } | undefined;
+        if (!customer) throw new HttpError(404, 'Customer not found');
+
+        if (customer.credit_limit > 0) {
+          const owed = customerOutstandingPaise(d.customer_id);
+          const wouldOwe = owed + (total - d.paid_paise);
+          if (wouldOwe > customer.credit_limit) {
+            throw new HttpError(400,
+              `${customer.name} already owes ${rupees(owed)} against a ${rupees(customer.credit_limit)} limit — `
+              + `this bill would take them to ${rupees(wouldOwe)}`);
+          }
+        }
+      }
 
       // ---- Persist ----------------------------------------------------------
       const invoiceDate = today();

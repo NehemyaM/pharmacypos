@@ -503,3 +503,51 @@ CREATE TABLE IF NOT EXISTS supplier_payments (
 CREATE INDEX IF NOT EXISTS idx_supplier_payments_supplier ON supplier_payments(supplier_id);
 CREATE INDEX IF NOT EXISTS idx_supplier_payments_date     ON supplier_payments(payment_date);
 CREATE INDEX IF NOT EXISTS idx_supplier_payments_purchase ON supplier_payments(purchase_id);
+
+-- ---------------------------------------------------------------------------
+-- Held (parked) bills
+--
+-- A customer walks off to fetch money or fetch a prescription; the counter must
+-- serve the next person without losing the basket. The cart is stored as JSON
+-- rather than as real sale rows because a held bill is not a sale — it may never
+-- become one.
+--
+-- Deliberately does NOT reserve stock. Reserving would let a bill nobody ever
+-- resumes lock medicine out of the shop indefinitely. The consequence is that a
+-- batch may sell out while a bill is held, so resuming must re-validate.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS held_bills (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  label       TEXT    NOT NULL,               -- how the counter recognises it
+  cart_json   TEXT    NOT NULL,               -- items + customer + prescription
+  item_count  INTEGER NOT NULL DEFAULT 0,
+  total_paise INTEGER NOT NULL DEFAULT 0,     -- indicative only, recomputed on resume
+  held_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_held_bills_created ON held_bills(created_at);
+
+-- ---------------------------------------------------------------------------
+-- Customer receipts — money coming IN against credit sales
+--
+-- The mirror of supplier_payments. A receipt may settle one invoice or sit on
+-- account. Outstanding for a customer is:
+--     credit sales (total - paid at billing) - receipts
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS customer_receipts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  receipt_no   TEXT    NOT NULL UNIQUE,
+  receipt_date TEXT    NOT NULL,
+  customer_id  INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  sale_id      INTEGER REFERENCES sales(id) ON DELETE SET NULL,
+  amount_paise INTEGER NOT NULL CHECK (amount_paise > 0),
+  mode         TEXT    NOT NULL DEFAULT 'CASH'
+               CHECK (mode IN ('CASH','UPI','CARD','BANK','ADJUSTMENT')),
+  reference    TEXT    NOT NULL DEFAULT '',
+  notes        TEXT    NOT NULL DEFAULT '',
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_customer_receipts_customer ON customer_receipts(customer_id);
+CREATE INDEX IF NOT EXISTS idx_customer_receipts_sale     ON customer_receipts(sale_id);
+CREATE INDEX IF NOT EXISTS idx_customer_receipts_date     ON customer_receipts(receipt_date);

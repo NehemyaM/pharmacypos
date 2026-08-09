@@ -86,6 +86,17 @@ downloadable off the machine, with a documented restore. See below.
 **Export.** Every report downloads as CSV, with amounts as real numbers your
 accountant can total.
 
+**Hold Bill.** F6 parks the basket under a name so the counter can serve the
+next customer; F7 opens the tray. Held bills deliberately do **not** reserve
+stock — a bill nobody resumes would otherwise lock medicine out of the shop
+indefinitely — so resuming re-checks every line and tells you what changed if a
+batch sold out or expired meanwhile.
+
+**Customer dues.** Credit sales, receipts against them, per-customer statements
+aged by invoice, and a credit limit that is *enforced* at billing time rather
+than merely displayed: a credit sale that would take a customer past their limit
+is refused, with the arithmetic in the message.
+
 ---
 
 ## The India-specific decisions
@@ -187,7 +198,8 @@ Dashboard. Anything billed after the backup was taken must be re-entered.
 npm test                          # 63 unit tests — GST, money, FEFO, CSV, schedule rules
 npm run verify:api                # 64 end-to-end API checks against a running server
 npm run verify:ui                 # 39 browser checks driving the real UI in Chromium
-node e2e/verify-new-features.mjs  # 25 checks: backup, export, returns, ledger
+node e2e/verify-new-features.mjs  # 25 checks: backup, export, returns, supplier ledger
+node e2e/verify-hold-and-dues.mjs # 20 checks: hold/resume, credit limits, receipts
 ```
 
 The unit tests pin the arithmetic: that ₹105 at 5% is ₹100 + ₹2.50 + ₹2.50,
@@ -240,8 +252,9 @@ Honest list, so nothing is a surprise:
   single biggest obstacle to going live.
 - SQLite is single-machine by design. Right for a counter PC, wrong for
   multi-branch; that would mean migrating to Postgres.
-- Printing goes through the browser's print dialog. The planned desktop build
-  prints silently to the till printer.
+- Printing goes through the browser's print dialog, and the invoice is laid out
+  for A4/A5. An 80&nbsp;mm thermal template and silent printing come with the
+  planned desktop build, along with the cash-drawer kick signal.
 
 ## Notes before going live
 
