@@ -25,7 +25,7 @@ git fetch --depth 1 origin "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
 echo "==> Building"
-npm ci --omit=dev --ignore-scripts=false
+npm ci                     # build tools live in devDependencies
 npm run build
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
@@ -42,7 +42,7 @@ done
 
 echo "!! The new build is not healthy — rolling back to ${PREVIOUS:0:7}" >&2
 git reset --hard "$PREVIOUS"
-npm ci --omit=dev --ignore-scripts=false
+npm ci
 npm run build
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 systemctl restart pharmacypos

@@ -29,6 +29,19 @@ if [[ $EUID -ne 0 ]]; then
   exit 2
 fi
 
+# A 1 GB e2-micro runs out of memory during the Vite/tsc build and the install
+# dies with an unhelpful "Killed". Swap costs nothing and makes the cheap VM
+# usable; it is never touched at runtime, since the app idles well under 200 MB.
+TOTAL_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+if [[ "$TOTAL_MB" -lt 2048 ]] && [[ ! -f /swapfile ]]; then
+  echo "==> Only ${TOTAL_MB}MB RAM — adding 2GB of swap so the build can finish"
+  fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  chmod 600 /swapfile
+  mkswap -q /swapfile
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 echo "==> Installing packages"
 apt-get update -qq
 apt-get install -y -qq curl ca-certificates git build-essential python3 debian-keyring \
@@ -67,7 +80,11 @@ fi
 
 echo "==> Building"
 cd "$APP_DIR"
-npm ci --omit=dev --ignore-scripts=false
+# The build needs typescript and vite, which are devDependencies, so this
+# installs everything. It is deliberately not pruned afterwards: `npm run seed`
+# and the test suites run through tsx, which would go with it, and 200MB of
+# node_modules is nothing against a 20GB disk.
+npm ci
 npm run build
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 

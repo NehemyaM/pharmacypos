@@ -33,14 +33,35 @@ the free Spark tier.
 
 ---
 
-## Option A — one machine (recommended to start)
+## Option A — one machine (recommended, and the chosen path)
 
 Front-end and API from a single Node process. Nothing to keep in sync, one
-domain, no CORS.
+domain, no CORS, one deploy command.
+
+### 1. Create the VM (from your own machine)
 
 ```bash
-# On a fresh Ubuntu 22.04+ server, as root:
-sudo bash deploy/setup-server.sh pharmacy.yourdomain.com
+gcloud auth login
+gcloud config set project YOUR-FIREBASE-PROJECT-ID
+
+bash deploy/create-vm.sh pharmacy.yourdomain.com
+# add --machine-type e2-micro for the cheaper 1GB VM; setup adds swap so it
+# still builds
+```
+
+A Firebase project *is* a Google Cloud project, so this VM lives in the same
+project, console and bill as Firebase. The script reserves a **static** IP — a
+shop's DNS record must not move because the machine restarted — opens only 80
+and 443, and prints the DNS record to add.
+
+### 2. Install on the server
+
+```bash
+gcloud compute ssh pharmacypos --zone asia-south1-a
+
+sudo bash -c 'apt-get update -qq && apt-get install -y -qq git \
+  && git clone --depth 1 https://github.com/NehemyaM/pharmacypos /opt/src \
+  && bash /opt/src/deploy/setup-server.sh pharmacy.yourdomain.com'
 ```
 
 That script installs Node 22 and Caddy, clones the repo, builds, creates a
