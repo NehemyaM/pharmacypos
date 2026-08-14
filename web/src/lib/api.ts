@@ -1,6 +1,21 @@
 const TOKEN_KEY = 'pharmacypos.token';
 const USER_KEY = 'pharmacypos.user';
 
+/**
+ * Where the API lives.
+ *
+ * Empty (the default) means same-origin — how it runs locally behind the Vite
+ * proxy, and how it runs when one Node process serves both the UI and the API.
+ * Set `VITE_API_URL` at build time when the front-end is hosted separately,
+ * e.g. the UI on Firebase Hosting and the backend on its own machine.
+ */
+export const API_BASE: string = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
+/** Absolute URL for an API path, honouring API_BASE. */
+export function apiUrl(path: string): string {
+  return `${API_BASE}/api${path}`;
+}
+
 export type Role = 'admin' | 'pharmacist' | 'cashier';
 
 export type SessionUser = {
@@ -44,7 +59,7 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(apiUrl(path), {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
@@ -93,7 +108,7 @@ export const api = {
  */
 export async function downloadFile(path: string, fallbackName: string): Promise<void> {
   const token = getToken();
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(apiUrl(path), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 

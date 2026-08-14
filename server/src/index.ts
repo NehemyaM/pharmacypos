@@ -23,8 +23,43 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '0.0.0.0';
 
+/** A refused origin is a policy decision, not a server fault — see below. */
+class CorsError extends Error {
+  constructor(readonly origin: string) {
+    super(`Origin not allowed: ${origin}`);
+    this.name = 'CorsError';
+  }
+}
+
 const app = express();
-app.use(cors());
+
+/**
+ * CORS.
+ *
+ * Same-origin deployments (one process serving UI and API) never need this.
+ * It matters when the UI is hosted separately — e.g. Firebase Hosting talking
+ * to a backend on its own machine. Set PHARMACY_ALLOWED_ORIGINS to a comma
+ * separated list; anything not listed is refused rather than reflected back.
+ */
+const allowedOrigins = (process.env.PHARMACY_ALLOWED_ORIGINS ?? '')
+  .split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    // No Origin header: same-origin request, curl, or a health probe.
+    if (!origin) return callback(null, true);
+    // Unconfigured means local development — allow, but say so once at boot.
+    if (allowedOrigins.length === 0) return callback(null, true);
+    if (allowedOrigins.includes(origin.replace(/\/$/, ''))) return callback(null, true);
+    return callback(new CorsError(origin));
+  },
+  credentials: false, // auth travels in the Authorization header, not cookies
+}));
+
+// Behind Caddy/nginx/a load balancer, so req.ip and rate limiting see the
+// real client rather than the proxy.
+app.set('trust proxy', 1);
+
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
@@ -71,6 +106,16 @@ app.use((req, res) => {
 });
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // A refused origin means this deployment is misconfigured, not broken.
+  // Returning 500 would send whoever debugs it looking for a server fault.
+  if (err instanceof CorsError) {
+    console.warn(`[cors] refused ${err.origin} (allowed: ${allowedOrigins.join(', ') || 'none set'})`);
+    res.status(403).json({
+      error: 'This site is not allowed to call the API. '
+        + 'Add its origin to PHARMACY_ALLOWED_ORIGINS on the server.',
+    });
+    return;
+  }
   console.error('[unhandled]', err);
   res.status(500).json({ error: 'Something went wrong on the server' });
 });
@@ -80,4 +125,13 @@ getDb(); // create/migrate the database before accepting traffic
 app.listen(PORT, HOST, () => {
   console.log(`PharmacyPOS API listening on http://${HOST}:${PORT}`);
   console.log(`Database: ${DB_PATH}`);
+  console.log(existsSync(webDist)
+    ? `Serving the UI from ${webDist}`
+    : 'UI build not found — API only (fine when the UI is hosted separately)');
+  console.log(allowedOrigins.length > 0
+    ? `CORS restricted to: ${allowedOrigins.join(', ')}`
+    : 'CORS open to all origins — set PHARMACY_ALLOWED_ORIGINS before exposing this publicly');
+  if (!process.env.PHARMACY_JWT_SECRET) {
+    console.log('PHARMACY_JWT_SECRET not set — using the generated secret beside the database');
+  }
 });

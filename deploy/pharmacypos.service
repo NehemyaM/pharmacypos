@@ -1,0 +1,38 @@
+[Unit]
+Description=PharmacyPOS billing and inventory API
+Documentation=https://github.com/NehemyaM/pharmacypos
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pharmacy
+Group=pharmacy
+WorkingDirectory=/opt/pharmacypos
+EnvironmentFile=/etc/pharmacypos.env
+ExecStart=/usr/bin/node server/dist/index.js
+Restart=always
+RestartSec=3
+
+# A pharmacy cannot afford the counter to stay down after a crash.
+StartLimitBurst=0
+
+# Hardening: the service needs its data directory and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pharmacypos
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pharmacypos
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=PharmacyPOS nightly database backup
+Documentation=https://github.com/NehemyaM/pharmacypos
+
+[Service]
+Type=oneshot
+User=pharmacy
+Group=pharmacy
+WorkingDirectory=/opt/pharmacypos
+EnvironmentFile=/etc/pharmacypos.env
+ExecStart=/usr/bin/node server/dist/backup-cli.js
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pharmacypos
+SyslogIdentifier=pharmacypos-backup

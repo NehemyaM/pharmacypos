@@ -1,0 +1,13 @@
+[Unit]
+Description=Back up the PharmacyPOS database every night
+Documentation=https://github.com/NehemyaM/pharmacypos
+
+[Timer]
+# 22:30 IST — after the shop has shut, before the machine is turned off.
+OnCalendar=*-*-* 22:30:00 Asia/Kolkata
+# If the server was off at 22:30, run as soon as it is back.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
