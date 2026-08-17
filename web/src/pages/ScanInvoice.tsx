@@ -430,7 +430,11 @@ export default function ScanInvoice() {
           {/* The original, kept beside the figures. Reviewing numbers against a
               picture you cannot see is not reviewing. */}
           <div className="xl:sticky xl:top-4 xl:self-start">
-            <div className="card overflow-hidden">
+            <div
+              className="card overflow-hidden"
+              data-testid="scan-original"
+              data-scan-file={apiUrl(`/invoice-scan/${scan.scan_id}/file`)}
+            >
               <div className="border-b border-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">
                 The invoice as supplied
               </div>

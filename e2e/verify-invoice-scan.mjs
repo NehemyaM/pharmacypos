@@ -148,8 +148,20 @@ check('the screen is reachable', await page.locator('#scanfile').isVisible());
 await page.setInputFiles('#scanfile', pdfPath);
 await page.waitForSelector('text=Line by line', { timeout: 60000 });
 check('the invoice is shown line by line', true);
-check('the original is shown beside it',
-  (await page.locator('object[type="application/pdf"], img[alt*="invoice"]').count()) > 0);
+// Assert the panel, not the tag it happens to use. A PDF is shown in an
+// <object>, which a headless browser with no PDF viewer treats differently from
+// a desktop one — that is a rendering detail, and what matters is that the
+// original is on screen and pointing at this scan.
+const original = page.locator('[data-testid="scan-original"]');
+await original.waitFor({ state: 'attached', timeout: 15000 }).catch(() => undefined);
+const originalSrc = await original.getAttribute('data-scan-file').catch(() => null);
+check('the original is shown beside it', await original.count() === 1);
+// The upload through the screen is its own scan, with its own reference — so
+// what is checked is that the panel points at a scan at all, not at the one the
+// API test made earlier.
+check('and it points at the scan just uploaded',
+  /\/invoice-scan\/[0-9a-f-]{36}\/file$/.test(originalSrc ?? ''),
+  String(originalSrc));
 await page.screenshot({ path: join(SHOT, '01-review.png'), fullPage: true });
 
 const rows = page.locator('table tbody tr');

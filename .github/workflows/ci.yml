@@ -1,0 +1,120 @@
+name: CI
+
+# The shop's money, its stock and its statutory registers all live behind these
+# tests; a change that breaks them should be caught here rather than at the
+# counter on a Monday morning.
+#
+# A branch is covered by its pull request and main is covered on merge. Running
+# on every push as well would do all of this twice for every pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Types, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # The OCR language data has to be in the build output, or reading an
+      # invoice would silently try to download it from a CDN — on a shop counter
+      # that may have no internet at all.
+      - name: The OCR language data shipped with the build
+        run: test -f server/dist/tessdata/eng.traineddata.gz
+
+  browser:
+    name: Browser suites
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Build and seed a demo shop
+        run: |
+          npm run build
+          npm run seed
+
+      - name: Start the app
+        run: |
+          npm start &
+          npx wait-on http://localhost:4000/api/health -t 90000
+
+      # Each suite is a separate step so a failure names itself in the summary
+      # instead of hiding inside one long log.
+      - name: API
+        run: npm run verify:api
+      - name: Counter and invoice
+        run: npm run verify:ui
+      - name: Backups, exports, returns, supplier ledger
+        run: node e2e/verify-new-features.mjs
+      - name: Held bills and customer dues
+        run: node e2e/verify-hold-and-dues.mjs
+      - name: Catalogue import and go-live checklist
+        run: node e2e/verify-import-and-golive.mjs
+      - name: Prescriber entry and file upload
+        run: node e2e/verify-doctor-and-upload.mjs
+      - name: Reading a distributor invoice
+        run: node e2e/verify-invoice-scan.mjs
+
+      # Every suite photographs what it saw. When one fails, those pictures are
+      # the quickest way to understand why.
+      - name: Keep the screenshots from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: e2e/screenshots/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  desktop:
+    name: Desktop application
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # better-sqlite3 is native and must match Electron's ABI, not Node's.
+      - name: Rebuild native modules for Electron
+        run: npx electron-rebuild -f -w better-sqlite3
+
+      - run: npm run build
+
+      - name: Drive the real application under a virtual display
+        run: xvfb-run -a node e2e/verify-desktop.mjs
