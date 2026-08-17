@@ -282,6 +282,11 @@ console.log('\nGo-live checklist');
     r.weak_accounts.some((u) => u.username === 'admin'),
     r.weak_accounts.map((u) => u.username).join(','));
   check('every check says where to fix it', r.checks.every((c) => c.fix && c.detail));
+  // A green tick beside "GSTIN is not set" reads as a contradiction, so each
+  // check carries a separate wording for the satisfied state.
+  check('a passing check is worded as satisfied, not as a problem',
+    r.checks.every((c) => c.titleOk && c.titleOk !== c.title)
+      && r.checks.find((c) => c.id === 'gstin')?.titleOk === 'GSTIN is set and valid');
   check('it counts outstanding blockers',
     r.counts.blockers_outstanding === r.checks.filter((c) => c.severity === 'blocker' && !c.ok).length);
   check('a seeded shop passes the statutory checks',

@@ -5,7 +5,10 @@ import { Alert, Spinner } from './ui';
 export type Check = {
   id: string;
   severity: 'blocker' | 'advisory';
+  /** Shown when the check fails. */
   title: string;
+  /** Shown when it passes — a tick beside "GSTIN is not set" reads as nonsense. */
+  titleOk: string;
   detail: string;
   ok: boolean;
   fix: string;
@@ -150,7 +153,7 @@ function CheckRow({ check }: { check: Check }) {
       </span>
       <div className="min-w-0 flex-1">
         <p className={`text-sm ${check.ok ? 'text-slate-500' : 'font-medium text-slate-800'}`}>
-          {check.title}
+          {check.ok ? check.titleOk : check.title}
         </p>
         {!check.ok && (
           <>

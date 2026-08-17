@@ -36,7 +36,16 @@ export type Check = {
   id: string;
   /** 'blocker' must be fixed before real billing; 'advisory' should be. */
   severity: 'blocker' | 'advisory';
+  /** Shown when the check fails: what is wrong. */
   title: string;
+  /**
+   * Shown when it passes: what is in place.
+   *
+   * Both wordings are needed because one does not invert into the other. A tick
+   * beside "GSTIN is not set" reads as a contradiction, and a list of them is
+   * unreadable at the exact moment the owner wants reassurance.
+   */
+  titleOk: string;
   /** Why it matters, in the shop's terms — not a rule citation. */
   detail: string;
   ok: boolean;
@@ -52,6 +61,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'shop_name',
       severity: 'blocker',
       title: 'Shop name is still the placeholder',
+      titleOk: 'Shop name is set',
       detail: 'Every bill prints "My Medical Store" until this is the real name of the shop.',
       ok: filled(s.shop_name) && s.shop_name !== 'My Medical Store',
       fix: 'Settings → Shop details',
@@ -60,6 +70,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'address',
       severity: 'blocker',
       title: 'Shop address is incomplete',
+      titleOk: 'Shop address and PIN code are complete',
       detail: 'A tax invoice must carry the supplier\'s address and PIN code.',
       ok: filled(s.address_line1) && filled(s.city) && /^\d{6}$/.test(s.pincode.trim()),
       fix: 'Settings → Shop details',
@@ -68,6 +79,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'gstin',
       severity: 'blocker',
       title: 'GSTIN is not set',
+      titleOk: 'GSTIN is set and valid',
       detail: 'Without it the bill is not a tax invoice, and the buyer cannot claim input credit. '
         + 'It also decides whether tax is split CGST/SGST or charged as IGST.',
       ok: filled(s.gstin) && isValidGstin(s.gstin),
@@ -77,6 +89,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'dl_form20',
       severity: 'blocker',
       title: 'Drug licence (Form 20) is not recorded',
+      titleOk: 'Drug licence (Form 20) is recorded',
       detail: 'The retail licence number for allopathic medicines has to appear on the bill.',
       ok: filled(s.dl_no_form20),
       fix: 'Settings → Shop details',
@@ -85,6 +98,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'dl_form21',
       severity: 'blocker',
       title: 'Drug licence (Form 21) is not recorded',
+      titleOk: 'Drug licence (Form 21) is recorded',
       detail: 'The second retail licence, covering the drugs listed in Schedule C and C1.',
       ok: filled(s.dl_no_form21),
       fix: 'Settings → Shop details',
@@ -93,6 +107,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'pharmacist',
       severity: 'blocker',
       title: 'Registered pharmacist is not named',
+      titleOk: 'Registered pharmacist is named, with registration number',
       detail: 'Schedule H1 supplies are signed for by the pharmacist on duty. The register is not '
         + 'valid without a name and a State Pharmacy Council registration number.',
       ok: filled(s.pharmacist_name) && filled(s.pharmacist_reg_no),
@@ -102,6 +117,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'fssai',
       severity: 'advisory',
       title: 'FSSAI licence is not recorded',
+      titleOk: 'FSSAI licence is recorded',
       detail: 'Needed only if the shop sells food items — protein powders, health drinks, baby food.',
       ok: filled(s.fssai_no),
       fix: 'Settings → Shop details',
@@ -110,6 +126,7 @@ function settingsChecks(s: Settings): Check[] {
       id: 'pan',
       severity: 'advisory',
       title: 'PAN is not recorded',
+      titleOk: 'PAN is recorded',
       detail: 'Convenient for the shop\'s accountant at the year end.',
       ok: filled(s.pan),
       fix: 'Settings → Shop details',
@@ -174,9 +191,8 @@ readinessRouter.get('/', (_req, res) => {
     {
       id: 'default_passwords',
       severity: 'blocker',
-      title: weak.length > 0
-        ? `${weak.length} account${weak.length === 1 ? '' : 's'} still using a password this software shipped with`
-        : 'No account is using a shipped password',
+      title: `${weak.length} account${weak.length === 1 ? '' : 's'} still using a password this software shipped with`,
+      titleOk: 'No account is using a password this software shipped with',
       detail: weak.length > 0
         ? `Anyone who has seen the setup guide can sign in as ${weak.map((u) => u.username).join(', ')}. `
           + 'Set a new password for each, or delete the ones the shop does not use.'
@@ -188,6 +204,7 @@ readinessRouter.get('/', (_req, res) => {
       id: 'catalogue',
       severity: 'blocker',
       title: 'No products in the catalogue',
+      titleOk: 'The catalogue has products in it',
       detail: 'Load the shop\'s product list before the counter opens.',
       ok: products > 0,
       fix: 'Import',
@@ -196,6 +213,7 @@ readinessRouter.get('/', (_req, res) => {
       id: 'stock',
       severity: 'blocker',
       title: 'No stock on hand',
+      titleOk: 'There is stock on hand to bill',
       detail: 'Nothing can be billed until there is stock with a batch number and expiry against it.',
       ok: inStock > 0,
       fix: 'Import, or Purchases for goods inward',
@@ -204,6 +222,7 @@ readinessRouter.get('/', (_req, res) => {
       id: 'backup',
       severity: realBills > 0 ? 'blocker' : 'advisory',
       title: 'No backup has been taken',
+      titleOk: 'A backup has been taken',
       detail: 'The shop\'s entire billing and stock history is one file on one machine. '
         + 'Take a backup and keep a copy off this computer.',
       ok: backups > 0,
