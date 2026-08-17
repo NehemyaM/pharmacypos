@@ -12,6 +12,11 @@ export const DB_PATH = process.env.PHARMACY_DB
 
 let _db: Database.Database | null = null;
 
+/** The directory the database lives in — backups and scans sit beside it. */
+export function dataDir(): string {
+  return dirname(DB_PATH);
+}
+
 export function getDb(): Database.Database {
   if (_db) return _db;
 
@@ -46,6 +51,9 @@ function migrate(db: Database.Database): void {
 
   if (!columns('users').includes('must_change_password')) {
     db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!columns('purchases').includes('scan_id')) {
+    db.exec("ALTER TABLE purchases ADD COLUMN scan_id TEXT NOT NULL DEFAULT ''");
   }
 }
 

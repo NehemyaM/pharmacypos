@@ -188,6 +188,9 @@ CREATE TABLE IF NOT EXISTS purchases (
   payment_mode   TEXT    NOT NULL DEFAULT 'CREDIT',
   notes          TEXT    NOT NULL DEFAULT '',
   status         TEXT    NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('COMPLETED','CANCELLED')),
+  -- The scan this was read from, when it was not typed by hand. Keeping the
+  -- link means the distributor's original photograph can be produced later.
+  scan_id        TEXT    NOT NULL DEFAULT '',
   created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at     TEXT    NOT NULL,
   UNIQUE (supplier_id, invoice_no)

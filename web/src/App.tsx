@@ -14,6 +14,7 @@ import H1Register from './pages/H1Register';
 import Contacts from './pages/Contacts';
 import ImportPage from './pages/Import';
 import SettingsPage from './pages/Settings';
+import ScanInvoice from './pages/ScanInvoice';
 import ExitGuard from './components/ExitGuard';
 import ForcePasswordChange from './components/ForcePasswordChange';
 
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: '/reports', label: 'Reports', icon: '📈' },
   { to: '/contacts', label: 'Contacts', icon: '👥' },
   { to: '/import', label: 'Import', icon: '⭱', roles: ['admin'] },
+  { to: '/scan-invoice', label: 'Read invoice', icon: '📷', roles: ['admin', 'pharmacist'] },
   { to: '/settings', label: 'Settings', icon: '⚙️', roles: ['admin'] },
 ];
 
@@ -127,6 +129,7 @@ export default function App() {
           <Route path="/reports" element={<Reports user={user} />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/import" element={<ImportPage />} />
+          <Route path="/scan-invoice" element={<ScanInvoice />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/billing" replace />} />
         </Routes>

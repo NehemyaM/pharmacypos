@@ -33,6 +33,9 @@ const purchaseSchema = z.object({
   payment_mode: z.string().default('CREDIT'),
   paid_paise: z.number().int().min(0).default(0),
   notes: z.string().default(''),
+  /** The scan this was read from, when it was not typed by hand. Keeping the
+   *  link means the original photograph can be produced years later. */
+  scan_id: z.string().max(64).default(''),
   items: z.array(purchaseItemSchema).min(1, 'Add at least one item'),
 });
 
@@ -72,10 +75,10 @@ purchasesRouter.post('/', (req, res) => {
 
       const purchaseInfo = db.prepare(
         `INSERT INTO purchases (invoice_no, invoice_date, supplier_id, is_interstate,
-           payment_mode, paid_paise, notes, created_by, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+           payment_mode, paid_paise, notes, scan_id, created_by, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       ).run(d.invoice_no, d.invoice_date, d.supplier_id, isInterstate ? 1 : 0,
-        d.payment_mode, d.paid_paise, d.notes, user.id, ts);
+        d.payment_mode, d.paid_paise, d.notes, d.scan_id, user.id, ts);
       const purchaseId = Number(purchaseInfo.lastInsertRowid);
 
       let taxableTotal = 0, discountTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
