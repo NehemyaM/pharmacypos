@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api, downloadFile } from '../lib/api';
+import { api, downloadFile, ApiError } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { Alert, Spinner, Modal, PageHeader, EmptyState } from '../components/ui';
 import GoLiveChecklist, { useReadiness } from '../components/GoLiveChecklist';
+import { describeGstinProblem, normaliseGstin } from '@shared/gstin';
 
 type Settings = {
   shop_name: string; legal_name: string; address_line1: string; address_line2: string;
@@ -58,6 +59,8 @@ function ShopSettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  // Set when the server rejects the GSTIN, so the owner can insist.
+  const [overridable, setOverridable] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -73,21 +76,26 @@ function ShopSettings() {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) =>
     setForm((f) => (f ? { ...f, [k]: v } : f));
 
-  async function submit() {
+  async function submit(gstinOverride = false) {
     setBusy(true);
     setError('');
+    setOverridable(false);
     setSaved(false);
     try {
       const updated = await api.put<Settings>('/settings', {
         ...form,
         round_off_enabled: form!.round_off_enabled === 1,
         low_stock_enabled: form!.low_stock_enabled === 1,
+        gstin_override: gstinOverride,
       });
       setForm(updated);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save settings');
+      // Only the check-digit complaint can be overruled; a state-code clash
+      // would silently mis-tax every sale, so that one stands.
+      setOverridable(err instanceof ApiError && err.overridable === true);
     } finally {
       setBusy(false);
     }
@@ -95,7 +103,20 @@ function ShopSettings() {
 
   return (
     <div className="max-w-3xl space-y-5">
-      {error && <Alert kind="error" onDismiss={() => setError('')}>{error}</Alert>}
+      {error && (
+        <Alert kind="error" onDismiss={() => { setError(''); setOverridable(false); }}>
+          <p>{error}</p>
+          {overridable && (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              <span>Certain the number is right? Your certificate wins over this check.</span>
+              <button className="btn-secondary !py-1 !text-xs" disabled={busy}
+                onClick={() => submit(true)}>
+                Save it anyway
+              </button>
+            </p>
+          )}
+        </Alert>
+      )}
       {saved && <Alert kind="success">Settings saved.</Alert>}
 
       <div className="card p-5">
@@ -157,9 +178,7 @@ function ShopSettings() {
             <label className="label">GSTIN</label>
             <input className="input font-mono uppercase" value={form.gstin}
               onChange={(e) => set('gstin', e.target.value)} />
-            <p className="mt-1 text-xs text-slate-400">
-              Must begin with your state code ({form.state_code}).
-            </p>
+            <GstinNote value={form.gstin} stateCode={form.state_code} />
           </div>
           <div>
             <label className="label">PAN</label>
@@ -614,4 +633,46 @@ function AuditLog() {
       )}
     </div>
   );
+}
+
+
+/**
+ * What the GSTIN field says under itself.
+ *
+ * Shown while typing rather than only on save, so a mistyped character is
+ * caught with the certificate still in hand — not after filling in the rest of
+ * the form and pressing a button that then refuses.
+ */
+function GstinNote({ value, stateCode }: { value: string; stateCode: string }) {
+  const g = normaliseGstin(value);
+
+  if (!g) {
+    return (
+      <p className="mt-1 text-xs text-slate-400">
+        15 characters, beginning with your state code ({stateCode}).
+      </p>
+    );
+  }
+
+  // Nothing is said until it is long enough to judge; complaining about the
+  // length of a number half-typed is just noise.
+  if (g.length < 15) {
+    return (
+      <p className="mt-1 text-xs text-slate-400">
+        {15 - g.length} more character{15 - g.length === 1 ? '' : 's'} to go.
+      </p>
+    );
+  }
+
+  const problem = describeGstinProblem(g);
+  if (problem) return <p className="mt-1 text-xs text-red-600">{problem}</p>;
+  if (g.slice(0, 2) !== stateCode) {
+    return (
+      <p className="mt-1 text-xs text-red-600">
+        This GSTIN is registered in state {g.slice(0, 2)}, but the shop above is set to{' '}
+        {stateCode}. Fix whichever is wrong.
+      </p>
+    );
+  }
+  return <p className="mt-1 text-xs text-emerald-600">Valid, and it matches the shop's state.</p>;
 }

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { getDb, nowIso } from '../db/index.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { isValidGstin, STATE_CODES } from '../lib/gst.js';
+import { describeGstinProblem, normaliseGstin, STATE_CODES } from '../lib/gst.js';
 import { audit } from '../lib/audit.js';
 import type { Settings } from '../types.js';
 
@@ -41,10 +41,17 @@ const settingsSchema = z.object({
   round_off_enabled: z.boolean().default(true),
   expiry_alert_days: z.number().int().min(0).max(365).default(90),
   low_stock_enabled: z.boolean().default(true),
-}).partial().refine((d) => !d.gstin || isValidGstin(d.gstin), {
-  message: 'That GSTIN is not valid',
-  path: ['gstin'],
-});
+  /**
+   * Save despite a GSTIN this software thinks is wrong.
+   *
+   * The check digit is arithmetic and does not get things wrong, but the owner
+   * is holding the registration certificate and this software is not. If the
+   * two ever disagree the shop must still be able to trade, so the block is
+   * overridable rather than absolute — it just cannot be overridden by
+   * accident.
+   */
+  gstin_override: z.boolean().default(false),
+}).partial();
 
 settingsRouter.put('/', requireAuth, requireRole('admin'), (req, res) => {
   const parsed = settingsSchema.safeParse(req.body);
@@ -56,13 +63,27 @@ settingsRouter.put('/', requireAuth, requireRole('admin'), (req, res) => {
   const existing = db.prepare('SELECT * FROM settings WHERE id = 1').get() as Settings;
   const d = parsed.data;
 
+  // Accept the number however it was read off the certificate — with spaces,
+  // in lower case — rather than rejecting the formatting and calling it invalid.
+  const gstin = normaliseGstin(d.gstin ?? existing.gstin);
+
+  if (d.gstin && !d.gstin_override) {
+    const problem = describeGstinProblem(d.gstin);
+    if (problem) {
+      res.status(400).json({ error: problem, field: 'gstin', overridable: true });
+      return;
+    }
+  }
+
   // A GSTIN embeds its state code; a mismatch would misclassify every supply
   // as inter-state and put the tax in the wrong column.
-  const gstin = (d.gstin ?? existing.gstin).toUpperCase();
   const stateCode = d.state_code ?? existing.state_code;
   if (gstin && gstin.slice(0, 2) !== stateCode) {
     res.status(400).json({
-      error: `GSTIN starts with ${gstin.slice(0, 2)} but the state code is ${stateCode} — they must match`,
+      error: `The GSTIN starts with ${gstin.slice(0, 2)} (${STATE_CODES[gstin.slice(0, 2)] ?? 'unknown'}) `
+        + `but the shop's state code is ${stateCode} (${STATE_CODES[stateCode] ?? 'unknown'}). `
+        + `They must match, or every sale would be taxed as if it crossed a state border.`,
+      field: 'gstin',
     });
     return;
   }

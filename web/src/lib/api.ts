@@ -53,9 +53,17 @@ export function clearSession(): void {
 }
 
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  /**
+   * True when the server rejected the value but will accept it if the user
+   * insists — a check it cannot be certain about, like a GSTIN check digit
+   * against a certificate only the owner is holding.
+   */
+  readonly overridable?: boolean;
+
+  constructor(readonly status: number, message: string, extra?: { overridable?: boolean }) {
     super(message);
     this.name = 'ApiError';
+    this.overridable = extra?.overridable;
   }
 }
 
@@ -84,9 +92,9 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const message = (data as { error?: string } | null)?.error
-      ?? `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    const body = data as { error?: string; overridable?: boolean } | null;
+    throw new ApiError(res.status, body?.error ?? `Request failed (${res.status})`,
+      { overridable: body?.overridable });
   }
   return data as T;
 }
