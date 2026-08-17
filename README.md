@@ -14,13 +14,28 @@ needed to raise a bill.
 
 ## Quick start
 
+Three commands, from nothing to a working shop:
+
 ```bash
+git clone https://github.com/NehemyaM/pharmacypos.git
+cd pharmacypos
 npm install
-npm run seed        # loads a demo Hyderabad medical store
-npm run dev         # API on :4000, UI on :5173
+npm run demo        # builds, loads a demo shop, serves on :4000
 ```
 
-Open http://localhost:5173 and sign in:
+Then open **http://localhost:4000**.
+
+`npm run demo` is safe to re-run: the seed refuses to touch a database that
+already has data in it, so it will not wipe a shop you have started using. Use
+`npm run seed -- --force` when you deliberately want the demo data back.
+
+Needs Node 20 or newer (`node --version`). On Windows use PowerShell or Git
+Bash. If port 4000 is taken, `PORT=4100 npm run demo`.
+
+To work on the code instead, `npm run dev` runs the API on :4000 and Vite with
+hot reload on :5173.
+
+Sign in with:
 
 | Username     | Password    | Role       | Can do                                        |
 |--------------|-------------|------------|-----------------------------------------------|
@@ -28,12 +43,10 @@ Open http://localhost:5173 and sign in:
 | `pharmacist` | `pharma123` | Pharmacist | Billing, Schedule H1, purchases, returns      |
 | `cashier`    | `cash123`   | Cashier    | OTC billing only                              |
 
-For production, build once and run a single process:
-
-```bash
-npm run build
-npm start           # serves API + UI together on :4000
-```
+On the shop counter, install the desktop build instead — see
+[Desktop application](#desktop-application). It is the same software, wrapped so
+it starts on boot, fills the screen and keeps its data where an update cannot
+destroy it.
 
 The database lives at `data/pharmacy.sqlite`. Back that file up — it is the
 entire shop. Override the location with `PHARMACY_DB=/path/to/db.sqlite`.
@@ -169,6 +182,51 @@ failed bill never burns one.
 **Indian formatting throughout** — lakh/crore digit grouping, amount in words
 in the Indian system, IST timestamps so "today's sales" doesn't shift at
 05:30 every night.
+
+---
+
+## Desktop application
+
+The counter machine should not be running a browser. The same software packages
+into an installable program that starts on boot, fills the screen, and cannot be
+casually exited.
+
+**Getting the Windows installer.** It has to be built on Windows, so CI does it:
+push a tag and the `.exe` appears on the GitHub release.
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+Download `PharmacyPOS-Setup-1.0.0.exe` from the release and run it on the shop
+PC. Windows will show a SmartScreen warning because the installer is not
+code-signed — **More info** → **Run anyway**. A signing certificate removes the
+warning and costs roughly ₹15–25k a year; it is optional.
+
+To build one locally instead, on the matching OS:
+
+```bash
+npm run rebuild:electron    # better-sqlite3 must match Electron's ABI, not Node's
+npm run desktop:win         # or desktop:linux
+```
+
+That ABI step matters: the native module can only be compiled for one runtime at
+a time. Run `npm run rebuild:node` before `npm test` again, or the server tests
+will not load it.
+
+**At the counter.**
+
+- Fullscreen kiosk, single instance. Staff cannot alt-tab out or open a second
+  copy.
+- **Ctrl+Shift+Q** is the only way out, and it asks for an admin password, which
+  is checked against the database rather than anything held in the page.
+- Bills print silently to the configured printer instead of raising the OS print
+  dialog, and the cash drawer opens on the ESC/POS kick.
+
+**Where the data lives.** `%APPDATA%\PharmacyPOS` on Windows, never the program
+folder. That separation is the whole point: an update replaces the installed
+program, so a database inside it would be destroyed on every upgrade. Backups
+and the machine's signing secret sit beside it.
 
 ---
 

@@ -13,6 +13,7 @@
     "dev:web": "npm run dev --workspace web",
     "build": "npm run build --workspace server && npm run build --workspace web",
     "start": "npm run start --workspace server",
+    "demo": "npm run build && npm run seed && npm start",
     "test": "npm run test --workspace server",
     "verify:api": "npm run smoke --workspace server",
     "verify:ui": "node e2e/ui-verify.mjs",
