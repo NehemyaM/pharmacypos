@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { csvCell, csvRupees, toCsv, csvFilename } from './csv.js';
+import { csvCell, csvRupees, toCsv, csvFilename, parseCsv, parseCsvTable, headerKey } from './csv.js';
 
 describe('CSV cell escaping', () => {
   test('passes plain text through', () => {
@@ -116,5 +116,96 @@ describe('filenames', () => {
 
   test('falls back to a bare name', () => {
     assert.equal(csvFilename('reorder'), 'reorder.csv');
+  });
+});
+
+describe('CSV parsing', () => {
+  test('reads a plain table', () => {
+    assert.deepEqual(parseCsv('a,b\n1,2'), [['a', 'b'], ['1', '2']]);
+  });
+
+  test('keeps commas inside quoted cells', () => {
+    assert.deepEqual(parseCsv('name,pack\nDolo,"Strip of 10, blister"'),
+      [['name', 'pack'], ['Dolo', 'Strip of 10, blister']]);
+  });
+
+  test('unescapes doubled quotes', () => {
+    assert.deepEqual(parseCsv('a\n"say ""hi"""'), [['a'], ['say "hi"']]);
+  });
+
+  test('handles a newline inside a quoted cell', () => {
+    assert.deepEqual(parseCsv('a,b\n"line1\nline2",x'),
+      [['a', 'b'], ['line1\nline2', 'x']]);
+  });
+
+  test('handles CRLF from Excel on Windows', () => {
+    assert.deepEqual(parseCsv('a,b\r\n1,2\r\n'), [['a', 'b'], ['1', '2']]);
+  });
+
+  test('strips a UTF-8 BOM', () => {
+    assert.deepEqual(parseCsv('﻿name\nDolo'), [['name'], ['Dolo']]);
+  });
+
+  test('a trailing newline does not add a phantom row', () => {
+    assert.equal(parseCsv('a\n1\n').length, 2);
+  });
+
+  test('keeps empty cells', () => {
+    assert.deepEqual(parseCsv('a,b,c\n1,,3'), [['a', 'b', 'c'], ['1', '', '3']]);
+  });
+
+  test('a file this system exported can be read back', () => {
+    // csvCell() prefixes an apostrophe to stop Excel executing the cell; the
+    // parser must give the original text back, not the apostrophe.
+    const csv = toCsv([{ n: '=SUM(A1:A2)' }], [{ header: 'Name', value: (r) => r.n }]);
+    assert.deepEqual(parseCsv(csv), [['Name'], ['=SUM(A1:A2)']]);
+  });
+
+  test('an apostrophe that is part of the name survives', () => {
+    assert.deepEqual(parseCsv("name\nD'Cruz Pharma"), [['name'], ["D'Cruz Pharma"]]);
+  });
+});
+
+describe('CSV header matching', () => {
+  test('ignores case, spaces and underscores', () => {
+    assert.equal(headerKey('Pack Size '), 'packsize');
+    assert.equal(headerKey('pack_size'), 'packsize');
+    assert.equal(headerKey('PACK-SIZE'), 'packsize');
+  });
+});
+
+describe('CSV tables', () => {
+  const csv = 'Name,Pack Size,GST %\r\nDolo 650,15,5\r\n\r\nCrocin,10,5\r\n';
+
+  test('keys records by normalised header', () => {
+    const { records } = parseCsvTable(csv);
+    assert.equal(records.length, 2);
+    assert.equal(records[0].name, 'Dolo 650');
+    assert.equal(records[0].packsize, '15');
+    assert.equal(records[0]['gst%'], '5');
+  });
+
+  test('skips blank lines a spreadsheet leaves behind', () => {
+    assert.equal(parseCsvTable(csv).records.length, 2);
+  });
+
+  test('reports the line number Excel would show', () => {
+    // Header on line 1, first record on 2, blank line 3, second record on 4.
+    assert.deepEqual(parseCsvTable(csv).lineNumbers, [2, 4]);
+  });
+
+  test('trims surrounding whitespace from values', () => {
+    const { records } = parseCsvTable('Name\n  Dolo 650  ');
+    assert.equal(records[0].name, 'Dolo 650');
+  });
+
+  test('an empty file yields nothing rather than throwing', () => {
+    assert.deepEqual(parseCsvTable('').records, []);
+  });
+
+  test('skips leading blank lines before the header', () => {
+    const { headers, records } = parseCsvTable('\n\nName\nDolo');
+    assert.deepEqual(headers, ['Name']);
+    assert.equal(records[0].name, 'Dolo');
   });
 });
