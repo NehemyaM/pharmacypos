@@ -35,7 +35,20 @@
     "desktop:win": "npm run build && electron-builder --win",
     "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
-    "verify:desktop": "npm run build && xvfb-run -a node e2e/verify-desktop.mjs"
+    "verify:desktop": "npm run build && xvfb-run -a node e2e/verify-desktop.mjs",
+    "verify:desktop:packaged": "npm run build && npx electron-builder --linux dir --publish never && PHARMACY_PACKAGED=\"$PWD/release/linux-unpacked/pharmacypos\" xvfb-run -a node e2e/verify-desktop.mjs"
+  },
+  "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.35.3",
+    "tesseract.js": "^7.0.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",

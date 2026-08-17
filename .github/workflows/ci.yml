@@ -118,3 +118,18 @@ jobs:
 
       - name: Drive the real application under a virtual display
         run: xvfb-run -a node e2e/verify-desktop.mjs
+
+      # Running from the source tree finds every module sitting in node_modules
+      # whether or not the installer would have included it. Packaging and then
+      # driving the result is the only way to know what a shop will actually
+      # get — it is how a build that shipped no dependencies at all, and a
+      # server that could not start because nothing declared it as ESM, were
+      # both found.
+      - name: Package it
+        run: npx electron-builder --linux dir --publish never
+
+      - name: Drive the packaged build, as a shop would run it
+        run: |
+          xvfb-run -a node e2e/verify-desktop.mjs
+        env:
+          PHARMACY_PACKAGED: ${{ github.workspace }}/release/linux-unpacked/pharmacypos

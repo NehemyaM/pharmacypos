@@ -15,3 +15,4 @@ server/dist/
 e2e/screenshots/
 *.tsbuildinfo
 e2e/downloads/
+release/

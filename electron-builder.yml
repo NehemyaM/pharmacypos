@@ -17,6 +17,13 @@ directories:
 
 # Ship the compiled server, the built UI and the Electron shell. Source,
 # tests and the developer's local database are deliberately excluded.
+#
+# The runtime dependencies are declared in the root package.json purely so that
+# they end up here. electron-builder reads that file to decide what to bundle,
+# and with the dependencies living only in server/package.json it packaged no
+# node_modules at all — the app started, forked the server, and the server died
+# on its first require. Nothing caught it because the desktop suite drives
+# `electron .` against the source tree, where node_modules is simply present.
 files:
   - desktop/**/*
   - package.json
@@ -32,13 +39,23 @@ extraResources:
   - from: web/dist
     to: app/web/dist
 
-# better-sqlite3 is native and must be built against Electron's ABI, not the
-# system Node's. electron-builder handles this when asar unpacking is set.
+# A native module cannot be loaded from inside an asar archive, and neither can
+# a worker script that a library spawns by path. Everything below is one or the
+# other.
 asar: true
 asarUnpack:
+  # Native: compiled against Electron's ABI by npmRebuild below.
   - "**/node_modules/better-sqlite3/**"
   - "**/node_modules/bindings/**"
   - "**/node_modules/file-uri-to-path/**"
+  # Native: sharp carries libvips as a platform-specific binary, and prepares
+  # every invoice photograph before it is read.
+  - "**/node_modules/sharp/**"
+  - "**/node_modules/@img/**"
+  # tesseract.js forks a worker by file path and loads its WASM core the same
+  # way; both must exist as real files on disk.
+  - "**/node_modules/tesseract.js/**"
+  - "**/node_modules/tesseract.js-core/**"
 
 npmRebuild: true
 nodeGypRebuild: false

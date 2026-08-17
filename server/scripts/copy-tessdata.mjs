@@ -6,7 +6,7 @@
  * at all, and the failure would appear only when someone tried to read an
  * invoice. Shipping the file removes the question.
  */
-import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,3 +28,17 @@ if (!source) {
 
 copyFileSync(source, join(out, 'eng.traineddata.gz'));
 console.log('tessdata: eng.traineddata.gz ->', out);
+
+/*
+ * Declare the compiled output as ES modules.
+ *
+ * The server is ESM, which `server/package.json` states — but the desktop build
+ * copies only `dist/` into the installed application, leaving the compiled
+ * files with no package.json above them. Node then reads them as CommonJS and
+ * the very first `import` throws "Cannot use import statement outside a
+ * module", the server dies, the shell restarts it, and the shop gets an
+ * application that never opens a window.
+ */
+const dist = join(here, '..', 'dist');
+writeFileSync(join(dist, 'package.json'), `${JSON.stringify({ type: 'module' }, null, 2)}\n`);
+console.log('dist/package.json: { "type": "module" }');
