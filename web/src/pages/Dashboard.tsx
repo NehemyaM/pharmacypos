@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { rupees, rupeesShort, formatDate } from '../lib/format';
 import { Alert, Spinner, Tile, PageHeader } from '../components/ui';
+import { GoLiveBanner, useReadiness } from '../components/GoLiveChecklist';
 
 type Dashboard = {
   date: string;
@@ -27,6 +28,9 @@ export default function Dashboard() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [stock, setStock] = useState<StockSummary | null>(null);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
+  // Owner-only, and silently absent for everyone else.
+  const { data: readiness } = useReadiness();
 
   useEffect(() => {
     Promise.all([
@@ -55,6 +59,12 @@ export default function Dashboard() {
         subtitle={`Trading position for ${formatDate(data.date)}`}
         actions={<Link to="/billing" className="btn-primary">New bill</Link>}
       />
+
+      {readiness && !readiness.ready && (
+        <div className="mb-5">
+          <GoLiveBanner data={readiness} onOpen={() => navigate('/settings')} />
+        </div>
+      )}
 
       {(stock.expired.batches > 0 || stock.expiring3.batches > 0) && (
         <div className="mb-5">

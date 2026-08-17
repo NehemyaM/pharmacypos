@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, downloadFile } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { Alert, Spinner, Modal, PageHeader, EmptyState } from '../components/ui';
+import GoLiveChecklist, { useReadiness } from '../components/GoLiveChecklist';
 
 type Settings = {
   shop_name: string; legal_name: string; address_line1: string; address_line2: string;
@@ -16,18 +17,19 @@ type Settings = {
 type User = {
   id: number; username: string; full_name: string; role: string;
   pharmacist_reg_no: string; phone: string; active: number; last_login_at: string | null;
+  must_change_password: number;
 };
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<'shop' | 'users' | 'backup' | 'audit'>('shop');
+  const [tab, setTab] = useState<'shop' | 'users' | 'backup' | 'audit' | 'golive'>('shop');
 
   return (
     <div className="p-6">
       <PageHeader title="Settings" subtitle="Shop particulars, staff accounts and audit trail" />
 
       <div className="mb-4 flex gap-2">
-        {([['shop', 'Shop details'], ['users', 'Staff'], ['backup', 'Backup'],
-          ['audit', 'Audit log']] as const).map(([k, label]) => (
+        {([['shop', 'Shop details'], ['users', 'Staff'], ['golive', 'Go-live checklist'],
+          ['backup', 'Backup'], ['audit', 'Audit log']] as const).map(([k, label]) => (
           <button
             key={k} onClick={() => setTab(k)}
             className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -43,6 +45,7 @@ export default function SettingsPage() {
 
       {tab === 'shop' && <ShopSettings />}
       {tab === 'users' && <Users />}
+      {tab === 'golive' && <GoLiveChecklist />}
       {tab === 'backup' && <Backups />}
       {tab === 'audit' && <AuditLog />}
     </div>
@@ -245,6 +248,9 @@ function Users() {
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<User | 'new' | null>(null);
 
+  const { data: readiness, reload: recheck } = useReadiness();
+  const weak = new Set((readiness?.weak_accounts ?? []).map((u) => u.id));
+
   function load() {
     setLoading(true);
     api.get<User[]>('/users').then(setRows)
@@ -261,6 +267,15 @@ function Users() {
           cancel bills. Cashiers can bill over-the-counter items.
         </Alert>
       </div>
+
+      {weak.size > 0 && (
+        <Alert kind="error">
+          {weak.size} account{weak.size === 1 ? '' : 's'} still use the password this software was
+          installed with. Anyone who has read the setup guide can sign in as them. Set a new
+          password on each — or disable the accounts the shop does not use.
+        </Alert>
+      )}
+
       <button className="btn-primary" onClick={() => setEditing('new')}>Add staff member</button>
 
       {error && <Alert kind="error" onDismiss={() => setError('')}>{error}</Alert>}
@@ -286,6 +301,18 @@ function Users() {
                   <td className="td font-medium">
                     {u.full_name}
                     {!u.active && <span className="chip ml-2 border-slate-200 bg-slate-100 text-slate-500">Disabled</span>}
+                    {u.active && weak.has(u.id) && (
+                      <span className="chip ml-2 border-red-200 bg-red-50 text-red-700"
+                        title="This account still uses a password this software shipped with">
+                        Shipped password
+                      </span>
+                    )}
+                    {u.active && !weak.has(u.id) && u.must_change_password === 1 && (
+                      <span className="chip ml-2 border-amber-200 bg-amber-50 text-amber-700"
+                        title="They must choose their own password at the next sign-in">
+                        Temporary password
+                      </span>
+                    )}
                   </td>
                   <td className="td font-mono text-xs">{u.username}</td>
                   <td className="td">
@@ -309,7 +336,7 @@ function Users() {
       </div>
 
       <UserForm target={editing} onClose={() => setEditing(null)}
-        onSaved={() => { setEditing(null); load(); }} />
+        onSaved={() => { setEditing(null); load(); recheck(); }} />
     </div>
   );
 }

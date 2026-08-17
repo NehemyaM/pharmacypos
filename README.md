@@ -97,6 +97,22 @@ aged by invoice, and a credit limit that is *enforced* at billing time rather
 than merely displayed: a credit sale that would take a customer past their limit
 is refused, with the arithmetic in the message.
 
+**Import.** Load the whole catalogue, and its opening stock, from a spreadsheet.
+Column names are matched loosely, so a distributor's price list or an export from
+the shop's previous software usually works untouched; expiries are accepted in
+every spelling a distributor sends (`2028-06`, `06/2028`, `JUN-2028`, `06-28`,
+`202806`) and refused rather than guessed at when unreadable. Preview first: the
+file is checked row by row and **nothing is written unless all of it is valid**,
+because a half-loaded catalogue cannot be reasoned about. Re-importing the same
+file is safe — a batch already on the shelf is reported and left alone, so stock
+can never be doubled by running it twice.
+
+**Go-live checklist.** The software checks itself and says what is not ready:
+missing GSTIN, either drug licence, the pharmacist's registration, no backup
+taken — and any account still using a password this software shipped with,
+detected by testing them. Nothing about an invalid invoice announces itself at
+the counter, so it is stated plainly on the dashboard until it is fixed.
+
 ---
 
 ## The India-specific decisions
@@ -195,12 +211,16 @@ Dashboard. Anything billed after the backup was taken must be re-entered.
 ## Verification
 
 ```bash
-npm test                          # 63 unit tests — GST, money, FEFO, CSV, schedule rules
-npm run verify:api                # 64 end-to-end API checks against a running server
-npm run verify:ui                 # 39 browser checks driving the real UI in Chromium
-node e2e/verify-new-features.mjs  # 25 checks: backup, export, returns, supplier ledger
-node e2e/verify-hold-and-dues.mjs # 20 checks: hold/resume, credit limits, receipts
+npm test                    # 90 unit tests — GST, money, FEFO, CSV, expiry parsing
+npm run verify:api          # 64 end-to-end API checks against a running server
+npm run verify:ui           # 39 browser checks driving the real UI in Chromium
+npm run verify:features     # 25 checks: backup, export, returns, supplier ledger
+npm run verify:hold-dues    # 20 checks: hold/resume, credit limits, receipts
+npm run verify:import       # 64 checks: catalogue import, go-live checklist
+npm run verify:desktop      # 20 checks: the real Electron app under Xvfb
 ```
+
+That is 322 checks. All of them pass on this commit.
 
 The unit tests pin the arithmetic: that ₹105 at 5% is ₹100 + ₹2.50 + ₹2.50,
 that a strip of 15 at ₹107 bills exactly ₹107, that GSTIN check digits
@@ -228,13 +248,19 @@ server/src/
   lib/gst.ts          slab handling, inclusive/exclusive split, GSTIN validation
   lib/money.ts        paise arithmetic, Indian grouping, amount in words
   lib/billing.ts      line computation, FEFO allocation, schedule rules
+  lib/csv.ts          CSV writing (formula-injection safe) and reading
   routes/sales.ts     the billing transaction — stock, ledger, H1, all atomic
+  routes/import.ts    catalogue + opening stock import, preview then one commit
+  routes/readiness.ts the go-live checklist the app runs against itself
   routes/*.ts         masters, purchases, returns, inventory, reports, settings
 web/src/
   pages/Billing.tsx      keyboard-driven counter screen
   pages/InvoiceView.tsx  the printable GST invoice
+  pages/Import.tsx       spreadsheet import with a row-by-row preview
   pages/*.tsx            dashboard, stock, products, purchases, reports, H1
-e2e/ui-verify.mjs     browser verification
+  components/GoLiveChecklist.tsx  what is not ready to bill for real
+desktop/main.js       the Electron shell: kiosk, supervised server, printing
+e2e/*.mjs             browser and desktop verification
 ```
 
 Stack: TypeScript throughout, Express + better-sqlite3 on the server, React +
@@ -247,22 +273,28 @@ and one process on a shop counter PC.
 
 Honest list, so nothing is a surprise:
 
-- **No bulk product import.** A real medical store carries thousands of SKUs and
-  there is no CSV importer yet — masters must be entered by hand. This is the
-  single biggest obstacle to going live.
 - SQLite is single-machine by design. Right for a counter PC, wrong for
   multi-branch; that would mean migrating to Postgres.
-- Printing goes through the browser's print dialog, and the invoice is laid out
-  for A4/A5. An 80&nbsp;mm thermal template and silent printing come with the
-  planned desktop build, along with the cash-drawer kick signal.
+- The invoice is laid out for A4/A5. An 80&nbsp;mm thermal template is still to
+  come; the desktop build already prints silently and kicks the cash drawer.
+- The importer loads products and opening stock. It does not read a distributor's
+  invoice as goods inward — use Purchases for that, so input tax credit is
+  recorded against the invoice.
 
 ## Notes before going live
 
+Work through **Settings → Go-live checklist** in the app. It checks most of this
+for you and will not report ready until every item is done.
+
 - **Schedule the daily backup** and check it runs. See the backup section above.
-- Change the three demo passwords, and delete any account you don't need.
+- Change the three demo passwords, and delete any account you don't need. The
+  checklist tests each account against the passwords this software shipped with
+  and names the ones still using them.
 - Put the real shop particulars into Settings: GSTIN, both drug licence
   numbers, FSSAI number if you sell supplements, and the registered
   pharmacist's name and registration number. They print on every invoice.
+- Load the shop's catalogue and opening stock through **Import**. Take a backup
+  first, so a wrong file is a five-second restore rather than an afternoon.
 - Set `PHARMACY_JWT_SECRET` if you expose the server beyond the counter
   machine; otherwise a random secret is generated once and kept next to the
   database.

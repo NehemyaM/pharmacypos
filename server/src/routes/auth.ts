@@ -112,7 +112,8 @@ usersRouter.use(requireAuth, requireRole('admin'));
 usersRouter.get('/', (_req, res) => {
   const db = getDb();
   res.json(db.prepare(
-    `SELECT id, username, full_name, role, pharmacist_reg_no, phone, active, last_login_at, created_at
+    `SELECT id, username, full_name, role, pharmacist_reg_no, phone, active, must_change_password,
+            last_login_at, created_at
      FROM users ORDER BY active DESC, full_name`,
   ).all());
 });
@@ -139,9 +140,12 @@ usersRouter.post('/', (req, res) => {
     res.status(409).json({ error: 'That username is already taken' });
     return;
   }
+  // The owner types the first password, so the new staff member must replace it
+  // before they can bill anything.
   const info = db.prepare(
-    `INSERT INTO users (username, password_hash, full_name, role, pharmacist_reg_no, phone, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (username, password_hash, full_name, role, pharmacist_reg_no, phone,
+       must_change_password, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
   ).run(username, bcrypt.hashSync(d.password, 10), d.full_name, d.role,
     d.pharmacist_reg_no, d.phone, nowIso());
 
@@ -184,9 +188,15 @@ usersRouter.patch('/:id', (req, res) => {
     }
   }
 
+  // An owner setting a password for someone else now knows it. Flag the account
+  // so the staff member has to choose their own on the next sign-in — otherwise
+  // a shared password is what the shop ends up running on. Resetting your own
+  // password is exempt: you already know it.
+  const forceChange = d.password && id !== req.user!.id ? 1 : existing.must_change_password;
+
   db.prepare(
     `UPDATE users SET full_name = ?, role = ?, pharmacist_reg_no = ?, phone = ?, active = ?,
-       password_hash = ? WHERE id = ?`,
+       password_hash = ?, must_change_password = ? WHERE id = ?`,
   ).run(
     d.full_name ?? existing.full_name,
     d.role ?? existing.role,
@@ -194,6 +204,7 @@ usersRouter.patch('/:id', (req, res) => {
     d.phone ?? existing.phone,
     d.active === undefined ? existing.active : d.active ? 1 : 0,
     d.password ? bcrypt.hashSync(d.password, 10) : existing.password_hash,
+    forceChange,
     id,
   );
   audit(req.user!.id, req.user!.username, 'UPDATE_USER', 'users', id, existing.username);
