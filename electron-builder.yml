@@ -31,11 +31,13 @@ files:
   - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
   - "!**/*.map"
 
+# server/dist already contains db/schema.sql and tessdata/, both put there by
+# the server's build step. Copying the schema again from src would write the
+# same destination twice, which fails outright on a clean tree — it only
+# appeared to work where a previous build had left the file in place.
 extraResources:
   - from: server/dist
     to: app/server/dist
-  - from: server/src/db/schema.sql
-    to: app/server/dist/db/schema.sql
   - from: web/dist
     to: app/web/dist
 

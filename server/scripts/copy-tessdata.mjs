@@ -6,7 +6,7 @@
  * at all, and the failure would appear only when someone tried to read an
  * invoice. Shipping the file removes the question.
  */
-import { copyFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, existsSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,6 +28,16 @@ if (!source) {
 
 copyFileSync(source, join(out, 'eng.traineddata.gz'));
 console.log('tessdata: eng.traineddata.gz ->', out);
+
+// Older builds let the OCR engine decompress its training data in place, which
+// leaves a 23MB copy of what the 10MB archive already holds. The engine now
+// unpacks into the application's own data directory instead, so any such file
+// here is stale and would only pad the installer.
+const stale = join(out, 'eng.traineddata');
+if (existsSync(stale)) {
+  rmSync(stale);
+  console.log('tessdata: removed a stale decompressed copy');
+}
 
 /*
  * Declare the compiled output as ES modules.
