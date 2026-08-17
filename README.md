@@ -269,16 +269,22 @@ Dashboard. Anything billed after the backup was taken must be re-entered.
 ## Verification
 
 ```bash
-npm test                    # 90 unit tests — GST, money, FEFO, CSV, expiry parsing
-npm run verify:api          # 64 end-to-end API checks against a running server
-npm run verify:ui           # 39 browser checks driving the real UI in Chromium
+npm test                    # 123 unit tests — GST, money, FEFO, CSV, expiry, invoice parsing
+npm run verify:api          # 64 API checks against a running server
+npm run verify:ui           # 39 browser checks driving the real UI
 npm run verify:features     # 25 checks: backup, export, returns, supplier ledger
 npm run verify:hold-dues    # 20 checks: hold/resume, credit limits, receipts
-npm run verify:import       # 64 checks: catalogue import, go-live checklist
+npm run verify:import       # 65 checks: catalogue import, go-live checklist
+npm run verify:doctor       # 20 checks: naming a prescriber, choosing a file
+npm run verify:scan         # 30 checks: reading an invoice from a photo or PDF
 npm run verify:desktop      # 20 checks: the real Electron app under Xvfb
 ```
 
-That is 322 checks. All of them pass on this commit.
+`npm run verify:all` runs everything that needs a running app, in one go. Start
+it first with `npm run demo`, or point the suites elsewhere with `BASE=...`.
+
+That is 406 checks. All of them pass on this commit, and CI runs every one
+on every push and pull request.
 
 The unit tests pin the arithmetic: that ₹105 at 5% is ₹100 + ₹2.50 + ₹2.50,
 that a strip of 15 at ₹107 bills exactly ₹107, that GSTIN check digits
@@ -296,6 +302,50 @@ The browser checks drive the actual UI and screenshot each step into
 `PLAYWRIGHT_CHROMIUM=/path/to/chromium`.
 
 ---
+
+
+---
+
+## Working on it
+
+`main` is what the shop would install. It is only reached through a pull
+request, and CI has to be green first.
+
+```bash
+git checkout -b claude/short-description-of-the-change
+# ... work, with a test for anything that could be wrong ...
+npm test && npm run typecheck
+npm run demo &                 # a running app for the browser suites
+npm run verify:all
+git push -u origin claude/short-description-of-the-change
+```
+
+Then open a pull request. `.github/pull_request_template.md` asks the questions
+this codebase in particular needs answered — whether tax is still extracted from
+the MRP rather than added to it, whether batch and expiry still reach every
+line, whether anything new leaves the shop's machine.
+
+**What CI runs** (`.github/workflows/ci.yml`), on every push and every pull
+request:
+
+| Job | What it proves |
+|-----|----------------|
+| Types, unit tests, build | The arithmetic is right and the thing compiles |
+| Browser suites | Seven suites drive the real UI against a running app |
+| Desktop application | The Electron shell starts and bills, under a virtual display |
+
+A failing browser suite uploads its screenshots as an artifact, which is
+usually the quickest way to see what went wrong.
+
+**Releases.** Tag a version and `.github/workflows/desktop-release.yml` builds
+the Windows installer on a Windows runner and attaches it to the GitHub release:
+
+```bash
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+Record what changed in `CHANGELOG.md` in the same pull request as the change
+itself, while the reason for it is still fresh.
 
 ## Layout
 

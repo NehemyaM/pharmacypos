@@ -21,6 +21,8 @@
     "verify:features": "node e2e/verify-new-features.mjs",
     "verify:hold-dues": "node e2e/verify-hold-and-dues.mjs",
     "verify:import": "node e2e/verify-import-and-golive.mjs",
+    "verify:doctor": "node e2e/verify-doctor-and-upload.mjs",
+    "verify:scan": "node e2e/verify-invoice-scan.mjs",
     "seed": "npm run seed --workspace server --",
     "seed:force": "npm run seed --workspace server -- --force",
     "backup": "npm run backup --workspace server --",
