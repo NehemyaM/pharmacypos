@@ -276,14 +276,14 @@ npm run verify:features     # 25 checks: backup, export, returns, supplier ledge
 npm run verify:hold-dues    # 20 checks: hold/resume, credit limits, receipts
 npm run verify:import       # 65 checks: catalogue import, go-live checklist
 npm run verify:doctor       # 20 checks: naming a prescriber, choosing a file
-npm run verify:scan         # 30 checks: reading an invoice from a photo or PDF
+npm run verify:scan         # 31 checks: reading an invoice from a photo or PDF
 npm run verify:desktop      # 20 checks: the real Electron app under Xvfb
 ```
 
 `npm run verify:all` runs everything that needs a running app, in one go. Start
 it first with `npm run demo`, or point the suites elsewhere with `BASE=...`.
 
-That is 406 checks. All of them pass on this commit, and CI runs every one
+That is 407 checks. All of them pass on this commit, and CI runs every one
 on every push and pull request.
 
 The unit tests pin the arithmetic: that ₹105 at 5% is ₹100 + ₹2.50 + ₹2.50,
