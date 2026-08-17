@@ -118,7 +118,7 @@ await page.waitForSelector('text=Tax Invoice', { timeout: 5000 });
 const invoiceText = await page.locator('.print-area').innerText();
 // The heading is rendered with CSS text-transform, so compare case-insensitively.
 check('invoice is headed "Tax Invoice"', /tax invoice/i.test(invoiceText));
-check('shop GSTIN printed', invoiceText.includes('36AAPFU0939F1ZV'));
+check('shop GSTIN printed', invoiceText.includes('36AAPFU0939F1ZW'));
 check('both drug licence numbers printed',
   invoiceText.includes('TS/HYD/20/2021/003412') && invoiceText.includes('TS/HYD/21/2021/003413'));
 check('invoice number follows the FY series', /INV\/\d{4}-\d{2}\/\d{5}/.test(invoiceText));

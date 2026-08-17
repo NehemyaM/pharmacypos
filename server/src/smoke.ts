@@ -69,7 +69,7 @@ async function main(): Promise<void> {
 
   const settings = await api('/settings', { token: admin });
   check('shop settings carry the Telangana GSTIN',
-    settings.data?.gstin === '36AAPFU0939F1ZV' && settings.data?.state_code === '36');
+    settings.data?.gstin === '36AAPFU0939F1ZW' && settings.data?.state_code === '36');
   check('both retail drug licences are recorded',
     !!settings.data?.dl_no_form20 && !!settings.data?.dl_no_form21);
 

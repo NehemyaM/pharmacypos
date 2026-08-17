@@ -108,7 +108,7 @@ const PRODUCTS: SeedProduct[] = [
 ];
 
 const SUPPLIERS = [
-  { name: 'Sri Venkateswara Pharma Distributors', contact: 'K. Ramesh', phone: '9848012345', address: '12-2-417/A, Gudimalkapur Main Road', city: 'Hyderabad', state: 'Telangana', code: '36', gstin: '36AAPFU0939F1ZV', dl: 'TS/HYD/20B/2019/1145', credit: 30 },
+  { name: 'Sri Venkateswara Pharma Distributors', contact: 'K. Ramesh', phone: '9848012345', address: '12-2-417/A, Gudimalkapur Main Road', city: 'Hyderabad', state: 'Telangana', code: '36', gstin: '36AAPFU0939F1ZW', dl: 'TS/HYD/20B/2019/1145', credit: 30 },
   { name: 'Deccan Medical Agencies', contact: 'Syed Imran', phone: '9440098765', address: '5-4-88, Ranigunj, Secunderabad', city: 'Hyderabad', state: 'Telangana', code: '36', gstin: '', dl: 'TS/HYD/21B/2018/0872', credit: 21 },
   { name: 'Kaveri Drug House', contact: 'P. Lakshmi', phone: '9032145678', address: '3-6-198, Himayatnagar', city: 'Hyderabad', state: 'Telangana', code: '36', gstin: '', dl: 'TS/HYD/20B/2020/2231', credit: 15 },
   { name: 'Bombay Pharma Traders', contact: 'Nitin Shah', phone: '9820011223', address: 'Princess Street, Marine Lines', city: 'Mumbai', state: 'Maharashtra', code: '27', gstin: '27AAPFU0939F1ZV', dl: 'MH/MUM/20B/2017/4410', credit: 45 },
@@ -127,7 +127,7 @@ const CUSTOMERS = [
   { name: 'Mohammed Ilyas', phone: '9391556677', address: '16-11-20, Malakpet', city: 'Hyderabad' },
   { name: 'Lakshmi Prasad', phone: '9848778899', address: 'Plot 45, Kukatpally Housing Board', city: 'Hyderabad' },
   { name: 'Anjali Verma', phone: '9959001122', address: 'Villa 7, Gachibowli', city: 'Hyderabad' },
-  { name: 'Sri Sai Clinic', phone: '9440887766', address: '2-1-98, Nallakunta', city: 'Hyderabad', gstin: '36AAGCB7383J1Z1' },
+  { name: 'Sri Sai Clinic', phone: '9440887766', address: '2-1-98, Nallakunta', city: 'Hyderabad', gstin: '36AAGCB7383J1Z9' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ function main(): void {
       'Hyderabad', 'Telangana', '36', '500007',
       '040-27176543, 9848012345',
       'saikrishnamedicals.hyd@gmail.com',
-      '36AAPFU0939F1ZV', 'AAPFU0939F',
+      '36AAPFU0939F1ZW', 'AAPFU0939F',
       'TS/HYD/20/2021/003412', 'TS/HYD/21/2021/003413',
       '13624999000123',
       'B. Sai Krishna', 'TSPC/A/24187',
@@ -318,7 +318,7 @@ function main(): void {
 
   console.log('\nSeed complete.\n');
   console.log('  Shop     : Sai Krishna Medical & General Stores, Habsiguda, Hyderabad');
-  console.log('  GSTIN    : 36AAPFU0939F1ZV   DL: TS/HYD/20/2021/003412, TS/HYD/21/2021/003413');
+  console.log('  GSTIN    : 36AAPFU0939F1ZW   DL: TS/HYD/20/2021/003412, TS/HYD/21/2021/003413');
   console.log('\n  Sign in with:');
   console.log('    admin      / admin123     (owner — full access)');
   console.log('    pharmacist / pharma123    (billing, purchases, Schedule H1)');
