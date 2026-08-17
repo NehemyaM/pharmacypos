@@ -2,7 +2,7 @@
   "name": "pharmacypos",
   "version": "1.0.0",
   "private": true,
-  "description": "Pharmacy billing & inventory management for Indian medical stores (GST, batch/expiry, Schedule H1)",
+  "description": "Pharmacy billing & inventory for Indian medical stores (GST, batch/expiry, Schedule H1)",
   "workspaces": [
     "server",
     "web"
@@ -20,13 +20,26 @@
     "seed:force": "npm run seed --workspace server -- --force",
     "backup": "npm run backup --workspace server --",
     "backup:list": "npm run backup --workspace server -- --list",
-    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web"
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
+    "desktop": "npm run build && electron .",
+    "desktop:rebuild": "electron-rebuild -f -w better-sqlite3",
+    "desktop:dir": "npm run build && electron-builder --dir",
+    "desktop:linux": "npm run build && electron-builder --linux",
+    "desktop:win": "npm run build && electron-builder --win",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "verify:desktop": "npm run build && xvfb-run -a node e2e/verify-desktop.mjs"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "concurrently": "^9.1.2",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "electron-updater": "^6.8.9",
     "playwright": "^1.49.1"
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "main": "desktop/main.js"
 }

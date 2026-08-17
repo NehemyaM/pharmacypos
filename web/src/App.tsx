@@ -13,6 +13,8 @@ import Reports from './pages/Reports';
 import H1Register from './pages/H1Register';
 import Contacts from './pages/Contacts';
 import SettingsPage from './pages/Settings';
+import ExitGuard from './components/ExitGuard';
+import ForcePasswordChange from './components/ForcePasswordChange';
 
 type NavItem = { to: string; label: string; icon: string; roles?: Role[]; hint?: string };
 
@@ -53,6 +55,12 @@ export default function App() {
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
+  }
+
+  // A fresh install ships with a known password; this blocks everything else
+  // until it has been changed.
+  if (user.must_change_password) {
+    return <ForcePasswordChange user={user} onDone={setUser} />;
   }
 
   const visible = NAV.filter((n) => !n.roles || n.roles.includes(user.role));
@@ -120,6 +128,10 @@ export default function App() {
           <Route path="*" element={<Navigate to="/billing" replace />} />
         </Routes>
       </main>
+
+      {/* Renders nothing in a browser; in the desktop build it is the way out
+          of kiosk mode. */}
+      <ExitGuard />
     </div>
   );
 }

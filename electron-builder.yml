@@ -1,0 +1,80 @@
+# Packaging for the PharmacyPOS desktop application.
+#
+#   npm run desktop:dir    unpacked build, for local testing
+#   npm run desktop:linux  AppImage
+#   npm run desktop:win    Windows installer (needs Windows or wine)
+#
+# The Windows installer is normally produced by CI — see
+# .github/workflows/desktop-release.yml — so no one needs a build machine.
+
+appId: com.maxreach.pharmacypos
+productName: PharmacyPOS
+copyright: Max Reach Pharmacy
+
+directories:
+  output: release
+  buildResources: desktop/icons
+
+# Ship the compiled server, the built UI and the Electron shell. Source,
+# tests and the developer's local database are deliberately excluded.
+files:
+  - desktop/**/*
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/*.map"
+
+extraResources:
+  - from: server/dist
+    to: app/server/dist
+  - from: server/src/db/schema.sql
+    to: app/server/dist/db/schema.sql
+  - from: web/dist
+    to: app/web/dist
+
+# better-sqlite3 is native and must be built against Electron's ABI, not the
+# system Node's. electron-builder handles this when asar unpacking is set.
+asar: true
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+  - "**/node_modules/bindings/**"
+  - "**/node_modules/file-uri-to-path/**"
+
+npmRebuild: true
+nodeGypRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: PharmacyPOS-Setup-${version}.${ext}
+  # Unsigned builds show a SmartScreen warning on first run. A code-signing
+  # certificate (~₹15,000/year) removes it; without one, tell staff to click
+  # "More info" then "Run anyway" the first time.
+
+nsis:
+  oneClick: false
+  perMachine: true               # a shop PC is shared; install for all users
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: PharmacyPOS
+  runAfterFinish: true
+  # Never remove the shop's data on uninstall. The database lives in
+  # %APPDATA%\PharmacyPOS and must survive an uninstall or a bad update.
+  deleteAppDataOnUninstall: false
+
+linux:
+  target:
+    - AppImage
+  category: Office
+  artifactName: PharmacyPOS-${version}.${ext}
+
+mac:
+  target: dmg
+  category: public.app-category.business
+
+publish:
+  provider: github
+  owner: NehemyaM
+  repo: pharmacypos

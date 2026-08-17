@@ -24,6 +24,8 @@ export type SessionUser = {
   full_name: string;
   role: Role;
   pharmacist_reg_no?: string;
+  /** True on the account auto-created for a fresh install. */
+  must_change_password?: boolean;
 };
 
 export function getToken(): string | null {

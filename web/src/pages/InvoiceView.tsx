@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { api, type SessionUser } from '../lib/api';
 import { rupees, formatExpiry, formatDate, formatDateTime } from '../lib/format';
 import { Alert, Spinner, Modal } from '../components/ui';
+import { printNow, openCashDrawer, isDesktop } from '../lib/desktop';
 
 type Item = {
   id: number; product_name: string; manufacturer: string; hsn_code: string;
@@ -48,10 +49,15 @@ export default function InvoiceView({ user }: { user: SessionUser }) {
     api.get<Sale>(`/sales/${id}`).then(setSale).catch((e) => setError(e.message));
   }, [id]);
 
-  // Auto-print when arriving straight from the billing screen.
+  // Auto-print when arriving straight from the billing screen. On the desktop
+  // this goes silently to the till printer and pops the cash drawer; in a
+  // browser it opens the print dialog.
   useEffect(() => {
     if (sale && params.get('print') === '1') {
-      const timer = setTimeout(() => window.print(), 350);
+      const timer = setTimeout(() => {
+        void printNow();
+        if (sale.payment_mode === 'CASH') void openCashDrawer();
+      }, 350);
       return () => clearTimeout(timer);
     }
   }, [sale, params]);
@@ -107,7 +113,9 @@ export default function InvoiceView({ user }: { user: SessionUser }) {
         {canManage && !cancelled && sale.returns.length === 0 && (
           <button onClick={() => setShowCancel(true)} className="btn-secondary !text-red-600">Cancel bill</button>
         )}
-        <button onClick={() => window.print()} className="btn-primary">Print</button>
+        <button onClick={() => void printNow()} className="btn-primary">
+          Print{isDesktop ? '' : '…'}
+        </button>
       </div>
 
       {/* ------------------------------ Invoice ------------------------------ */}
