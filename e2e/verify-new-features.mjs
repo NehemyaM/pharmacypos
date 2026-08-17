@@ -6,7 +6,10 @@ import { chromium } from 'playwright';
 import { mkdirSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+// Defaults to the single-process build, which serves the UI and the API
+// together — the same thing a shop runs. Point BASE at :5173 to drive the Vite
+// dev server instead.
+const BASE = process.env.BASE ?? 'http://localhost:4000';
 const SHOT = fileURLToPath(new URL('./screenshots/features', import.meta.url));
 const DL = fileURLToPath(new URL('./downloads', import.meta.url));
 mkdirSync(SHOT, { recursive: true });

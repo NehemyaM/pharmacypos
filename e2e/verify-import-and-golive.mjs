@@ -11,7 +11,10 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const API = process.env.API ?? 'http://localhost:4000';
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+// Defaults to the single-process build, which serves the UI and the API
+// together — the same thing a shop runs. Point BASE at :5173 to drive the Vite
+// dev server instead.
+const BASE = process.env.BASE ?? 'http://localhost:4000';
 const SHOT = fileURLToPath(new URL('./screenshots/import', import.meta.url));
 mkdirSync(SHOT, { recursive: true });
 
@@ -435,9 +438,9 @@ await page.fill('#csvtext', [
   `UI Import ${stamp},Acme Labs,10,UI${stamp},2029-05,60,42,4`,
 ].join('\n'));
 await page.click('button:has-text("Check the file")');
-await page.waitForSelector('button:has-text("Import 1 rows")', { timeout: 15000 });
+await page.waitForSelector('button:has-text("Import 1 row")', { timeout: 15000 });
 check('a clean file offers to import', true);
-await page.click('button:has-text("Import 1 rows")');
+await page.click('button:has-text("Import 1 row")');
 await page.waitForSelector('text=/Imported 1 new product/', { timeout: 20000 });
 check('the UI confirms what it imported', true);
 await page.screenshot({ path: `${SHOT}/imported.png`, fullPage: true });

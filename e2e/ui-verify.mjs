@@ -92,7 +92,7 @@ await page.waitForTimeout(600);
 check('H1 warning banner appears',
   await page.locator('text=Schedule H1 / X on this bill').isVisible());
 check('prescription section becomes required',
-  await page.locator('select').filter({ hasText: 'Select prescribing doctor' }).isVisible());
+  await page.locator('#doctor').isVisible());
 
 const saveBtn = page.locator('button:has-text("Save & Print")');
 check('save is blocked until compliance fields are filled', await saveBtn.isDisabled());
@@ -101,8 +101,12 @@ const blockers = await page.locator('ul.text-amber-700 li').allInnerTexts();
 check('blocking reasons are listed to the user', blockers.length > 0, blockers.join('; '));
 await page.screenshot({ path: `${SHOT}/04-h1-gating.png`, fullPage: true });
 
-// Fill compliance fields
-await page.selectOption('select', { index: 1 });
+// Fill compliance fields. The prescriber is typed, not picked from a list, so
+// that a doctor the shop has never seen can still be billed.
+await page.locator('#doctor').fill('Dr');
+await page.waitForSelector('#doctor ~ div button', { timeout: 5000 });
+await page.locator('#doctor ~ div button').first().click();
+await page.waitForTimeout(300);
 await page.fill('input[placeholder="Patient name *"]', 'Verification Patient');
 await page.fill('input[placeholder="Patient address *"]', 'Habsiguda, Hyderabad');
 await page.waitForTimeout(400);

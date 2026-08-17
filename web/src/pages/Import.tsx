@@ -43,6 +43,20 @@ const ACTION_STYLE: Record<Row['action'], string> = {
   skip: 'border-red-200 bg-red-50 text-red-700',
 };
 
+/**
+ * How big the chosen file is, in words that always mean something.
+ *
+ * Rounding to whole kilobytes printed "0 KB" for a short file, which reads as
+ * "nothing was loaded" at the exact moment the user is checking whether the
+ * upload worked. The row count is what they actually want anyway.
+ */
+function describeSize(csv: string): string {
+  const rows = csv.trim() ? csv.trim().split(/\r?\n/).length - 1 : 0;
+  const bytes = new Blob([csv]).size;
+  const size = bytes < 1024 ? `${bytes} bytes` : `${(bytes / 1024).toFixed(1)} KB`;
+  return `${rows} row${rows === 1 ? '' : 's'}, ${size}`;
+}
+
 export default function ImportPage() {
   const [csv, setCsv] = useState('');
   const [filename, setFilename] = useState('');
@@ -138,7 +152,7 @@ export default function ImportPage() {
           />
           {filename && (
             <span className="text-xs text-slate-500">
-              {filename} — {(csv.length / 1024).toFixed(0)} KB
+              {filename} — {describeSize(csv)}
             </span>
           )}
         </div>
@@ -214,7 +228,8 @@ export default function ImportPage() {
                 disabled={busy !== ''}
                 onClick={() => void run(true)}
               >
-                {busy === 'commit' ? <Spinner /> : null} Import {summary.rows} rows
+                {busy === 'commit' ? <Spinner /> : null}{' '}
+                Import {summary.rows} {summary.rows === 1 ? 'row' : 'rows'}
               </button>
             </div>
           )}

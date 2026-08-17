@@ -5,6 +5,7 @@ import {
   rupees, formatExpiry, monthsToExpiry, scheduleClass, formatQty, PAYMENT_MODES,
 } from '../lib/format';
 import { Alert, Spinner, Modal, useAutoFocus } from '../components/ui';
+import DoctorPicker from '../components/DoctorPicker';
 
 type ProductHit = {
   id: number; name: string; generic_name: string; manufacturer: string;
@@ -19,7 +20,6 @@ type BatchOption = {
   sale_rate_paise: number; qty_units: number;
 };
 
-type Doctor = { id: number; name: string; qualification: string; hospital: string; address: string };
 type Customer = { id: number; name: string; phone: string; address: string; gstin: string };
 
 type HeldBill = {
@@ -59,7 +59,6 @@ export default function Billing({ user }: { user: SessionUser }) {
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [customerMatches, setCustomerMatches] = useState<Customer[]>([]);
 
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [doctorId, setDoctorId] = useState<number | null>(null);
   const [prescriptionNo, setPrescriptionNo] = useState('');
   const [patientName, setPatientName] = useState('');
@@ -87,7 +86,6 @@ export default function Billing({ user }: { user: SessionUser }) {
   }, []);
 
   useEffect(() => {
-    api.get<Doctor[]>('/doctors').then(setDoctors).catch(() => undefined);
     loadHeld();
   }, [loadHeld]);
 
@@ -712,17 +710,7 @@ export default function Billing({ user }: { user: SessionUser }) {
                   <span className="chip border-red-200 bg-red-100 text-red-700">Required</span>
                 </h3>
                 <div className="space-y-2">
-                  <select
-                    className="input" value={doctorId ?? ''}
-                    onChange={(e) => setDoctorId(e.target.value ? Number(e.target.value) : null)}
-                  >
-                    <option value="">Select prescribing doctor…</option>
-                    {doctors.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}{d.hospital ? ` — ${d.hospital}` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <DoctorPicker value={doctorId} onChange={setDoctorId} />
                   <input
                     className="input" placeholder="Prescription number (optional)"
                     value={prescriptionNo} onChange={(e) => setPrescriptionNo(e.target.value)}
