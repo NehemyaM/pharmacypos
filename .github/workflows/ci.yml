@@ -1,12 +1,14 @@
 name: CI
 
-# Runs on every push and every pull request. The shop's money, its stock and its
-# statutory registers all live behind these tests; a change that breaks them
-# should be caught here rather than at the counter on a Monday morning.
-
+# The shop's money, its stock and its statutory registers all live behind these
+# tests; a change that breaks them should be caught here rather than at the
+# counter on a Monday morning.
+#
+# A branch is covered by its pull request and main is covered on merge. Running
+# on every push as well would do all of this twice for every pull request.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
