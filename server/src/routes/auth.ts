@@ -38,7 +38,12 @@ authRouter.post('/login', (req, res) => {
   audit(user.id, user.username, 'LOGIN', 'users', user.id, '');
   res.json({
     token: signToken(payload),
-    user: { ...payload, pharmacist_reg_no: user.pharmacist_reg_no },
+    user: {
+      ...payload,
+      pharmacist_reg_no: user.pharmacist_reg_no,
+      // Set on the account created automatically for a fresh install.
+      must_change_password: user.must_change_password === 1,
+    },
   });
 });
 
@@ -52,6 +57,29 @@ authRouter.get('/me', requireAuth, (req, res) => {
     return;
   }
   res.json(user);
+});
+
+/**
+ * Confirm the signed-in user's password without changing anything.
+ *
+ * Used by the desktop shell before leaving kiosk mode or closing the app: an
+ * unattended counter that is already signed in must not be a way out.
+ */
+authRouter.post('/verify-password', requireAuth, (req, res) => {
+  const parsed = z.object({ password: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Password is required' });
+    return;
+  }
+  const user = getDb().prepare('SELECT * FROM users WHERE id = ? AND active = 1')
+    .get(req.user!.id) as User | undefined;
+
+  if (!user || !bcrypt.compareSync(parsed.data.password, user.password_hash)) {
+    audit(req.user!.id, req.user!.username, 'VERIFY_PASSWORD_FAILED', 'users', req.user!.id, '');
+    res.status(401).json({ error: 'That password is not correct' });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 authRouter.post('/change-password', requireAuth, (req, res) => {
@@ -70,7 +98,7 @@ authRouter.post('/change-password', requireAuth, (req, res) => {
     res.status(401).json({ error: 'Current password is incorrect' });
     return;
   }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?')
     .run(bcrypt.hashSync(parsed.data.newPassword, 10), user.id);
   audit(user.id, user.username, 'CHANGE_PASSWORD', 'users', user.id, '');
   res.json({ ok: true });

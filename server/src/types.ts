@@ -9,6 +9,7 @@ export type User = {
   pharmacist_reg_no: string;
   phone: string;
   active: number;
+  must_change_password: number;
   last_login_at: string | null;
   created_at: string;
 };

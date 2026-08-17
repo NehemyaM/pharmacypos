@@ -179,10 +179,11 @@ function main(): void {
     console.log('Database already has data. Re-run with --force to wipe and reseed.');
     return;
   }
-  if (force) {
-    console.log('Wiping existing data...');
-    wipe();
-  }
+  // Always clear first, even without --force. Opening the database bootstraps a
+  // default settings row and an admin account so a fresh install is usable; the
+  // seed writes its own versions of both and would otherwise collide with them.
+  console.log(force ? 'Wiping existing data...' : 'Clearing the bootstrapped defaults...');
+  wipe();
 
   db.transaction(() => {
     // ---- Shop identity ----------------------------------------------------
