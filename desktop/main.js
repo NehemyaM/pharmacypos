@@ -94,6 +94,9 @@ function startServer(port) {
       PHARMACY_DB: path.join(DATA_DIR, 'pharmacy.sqlite'),
       PHARMACY_BACKUP_DIR: path.join(DATA_DIR, 'backups'),
       PHARMACY_JWT_SECRET: machineSecret(),
+      // The OCR engine unpacks its training data before use, and cannot do
+      // that inside an installed program folder.
+      PHARMACY_OCR_CACHE: path.join(DATA_DIR, 'ocr-cache'),
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
@@ -319,14 +322,37 @@ ipcMain.handle('pharmacy:print', async (_event, deviceName) => {
 });
 
 /** Printers the OS knows about, so Settings can offer a real list. */
+/**
+ * The printers this machine knows about.
+ *
+ * Asking the operating system can fail, and worse, can simply not answer: on a
+ * machine with no print service running the call sits there. A counter PC that
+ * has not had its thermal printer set up yet is exactly that machine, so this
+ * is bounded and always resolves. An empty list is a fine answer — it means
+ * "none configured", which the shop can act on. A frozen screen is not.
+ */
 ipcMain.handle('pharmacy:printers', async () => {
   if (!mainWindow) return [];
-  const printers = await mainWindow.webContents.getPrintersAsync();
-  return printers.map((p) => ({
-    name: p.name,
-    displayName: p.displayName,
-    isDefault: p.isDefault,
-  }));
+  try {
+    const printers = await Promise.race([
+      mainWindow.webContents.getPrintersAsync(),
+      new Promise((resolve) => {
+        const t = setTimeout(() => {
+          log('printer list timed out; reporting none');
+          resolve([]);
+        }, 5000);
+        t.unref?.();
+      }),
+    ]);
+    return printers.map((p) => ({
+      name: p.name,
+      displayName: p.displayName,
+      isDefault: p.isDefault,
+    }));
+  } catch (err) {
+    log('could not list printers:', err?.message ?? err);
+    return [];
+  }
 });
 
 /**

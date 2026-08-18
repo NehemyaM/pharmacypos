@@ -17,12 +17,13 @@
     "test": "npm run test --workspace server",
     "verify:api": "npm run smoke --workspace server",
     "verify:ui": "node e2e/ui-verify.mjs",
-    "verify:all": "npm run verify:api && npm run verify:ui && node e2e/verify-new-features.mjs && node e2e/verify-hold-and-dues.mjs && node e2e/verify-import-and-golive.mjs && node e2e/verify-doctor-and-upload.mjs && node e2e/verify-invoice-scan.mjs",
+    "verify:all": "npm run verify:api && npm run verify:ui && node e2e/verify-new-features.mjs && node e2e/verify-hold-and-dues.mjs && node e2e/verify-import-and-golive.mjs && node e2e/verify-doctor-and-upload.mjs && node e2e/verify-invoice-scan.mjs && node e2e/verify-till.mjs",
     "verify:features": "node e2e/verify-new-features.mjs",
     "verify:hold-dues": "node e2e/verify-hold-and-dues.mjs",
     "verify:import": "node e2e/verify-import-and-golive.mjs",
     "verify:doctor": "node e2e/verify-doctor-and-upload.mjs",
     "verify:scan": "node e2e/verify-invoice-scan.mjs",
+    "verify:till": "node e2e/verify-till.mjs",
     "seed": "npm run seed --workspace server --",
     "seed:force": "npm run seed --workspace server -- --force",
     "backup": "npm run backup --workspace server --",
@@ -35,7 +36,20 @@
     "desktop:win": "npm run build && electron-builder --win",
     "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
-    "verify:desktop": "npm run build && xvfb-run -a node e2e/verify-desktop.mjs"
+    "verify:desktop": "npm run build && xvfb-run -a node e2e/verify-desktop.mjs",
+    "verify:desktop:packaged": "npm run build && npx electron-builder --linux dir --publish never && PHARMACY_PACKAGED=\"$PWD/release/linux-unpacked/pharmacypos\" xvfb-run -a node e2e/verify-desktop.mjs"
+  },
+  "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.35.3",
+    "tesseract.js": "^7.0.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",

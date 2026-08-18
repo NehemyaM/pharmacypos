@@ -59,10 +59,15 @@ async function getWorker(): Promise<Worker> {
 
   starting = (async () => {
     const dir = langPath();
-    mkdirSync(dir, { recursive: true });
+    // The worker decompresses the training data into its cache directory. In an
+    // installed copy the program folder is read-only — on Windows it sits under
+    // Program Files — so the cache has to live somewhere the shop's user can
+    // write. The desktop shell points this at its own data directory.
+    const cache = process.env.PHARMACY_OCR_CACHE ?? dir;
+    mkdirSync(cache, { recursive: true });
     const w = await createWorker('eng', 1, {
       langPath: dir,
-      cachePath: dir,
+      cachePath: cache,
       gzip: true,
       // Silence the progress chatter; it is not useful in a server log.
       logger: () => undefined,
@@ -97,11 +102,38 @@ export type OcrResult = {
   took_ms: number;
 };
 
+/**
+ * How long one page may take before it is treated as stuck.
+ *
+ * A clean invoice reads in under three seconds. The ceiling is not about
+ * patience — it is that a worker which never answers would hold the request
+ * open for ever, and the counter would sit on a spinner with no way back.
+ * Better to fail, say so, and let the shop try again.
+ */
+const PAGE_TIMEOUT_MS = 60_000;
+
 /** Recognise an image buffer, returning every word with its bounding box. */
 export async function readImage(image: Buffer): Promise<OcrResult> {
   const w = await getWorker();
   const started = Date.now();
-  const { data } = await w.recognize(image, {}, { blocks: true, text: false });
+
+  const recognised = await Promise.race([
+    w.recognize(image, {}, { blocks: true, text: false }),
+    new Promise<never>((_, reject) => {
+      const t = setTimeout(
+        () => reject(new Error('Reading that picture took too long and was stopped.')),
+        PAGE_TIMEOUT_MS,
+      );
+      t.unref?.();
+    }),
+  ]).catch(async (err) => {
+    // A worker that timed out is not trustworthy afterwards; drop it so the
+    // next attempt starts from a clean one.
+    await stopOcr().catch(() => undefined);
+    throw err;
+  });
+
+  const { data } = recognised;
 
   const words: OcrWord[] = [];
   for (const block of data.blocks ?? []) {

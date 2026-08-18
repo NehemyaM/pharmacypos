@@ -120,6 +120,27 @@ because a half-loaded catalogue cannot be reasoned about. Re-importing the same
 file is safe — a batch already on the shelf is reported and left alone, so stock
 can never be doubled by running it twice.
 
+**Cash drawer.** Open the till with a float, record cash going in and out
+during the day, and count the drawer at close. The only number that matters is
+counted less expected, because that is how a shop finds out cash is going
+missing — and it cannot be computed at all unless the morning's float was
+written down. Counting is done note by note rather than as one figure: a single
+number can be made to agree with the expected total, a count of notes has to be
+justified note by note. Card and UPI takings are shown but never counted as
+cash, so a UPI-heavy day does not look like a huge shortfall.
+
+Billing is never blocked for want of an open till — a customer is standing
+there — so a sale with no session open opens one itself, flagged as opened by a
+sale rather than a person. Its close then says the float was never recorded
+instead of reporting a meaningless shortfall, and the owner can still enter the
+morning's float afterwards.
+
+Opening the drawer without a sale behind it is the ordinary way cash leaves a
+shop, so it asks who and why, and records it. The reason is stored *before* the
+drawer springs: if the record fails, the drawer stays shut. A cash drawer cannot
+be closed by software — it is spring-loaded and pushed shut by hand — so the
+software records openings rather than pretending to control them.
+
 **Go-live checklist.** The software checks itself and says what is not ready:
 missing GSTIN, either drug licence, the pharmacist's registration, no backup
 taken — and any account still using a password this software shipped with,
@@ -269,7 +290,7 @@ Dashboard. Anything billed after the backup was taken must be re-entered.
 ## Verification
 
 ```bash
-npm test                    # 123 unit tests — GST, money, FEFO, CSV, expiry, invoice parsing
+npm test                    # 135 unit tests — GST, money, FEFO, CSV, expiry, invoice parsing
 npm run verify:api          # 64 API checks against a running server
 npm run verify:ui           # 39 browser checks driving the real UI
 npm run verify:features     # 25 checks: backup, export, returns, supplier ledger
@@ -277,13 +298,14 @@ npm run verify:hold-dues    # 20 checks: hold/resume, credit limits, receipts
 npm run verify:import       # 65 checks: catalogue import, go-live checklist
 npm run verify:doctor       # 20 checks: naming a prescriber, choosing a file
 npm run verify:scan         # 31 checks: reading an invoice from a photo or PDF
+npm run verify:till         # 28 checks: opening the till, cash in and out, closing
 npm run verify:desktop      # 20 checks: the real Electron app under Xvfb
 ```
 
 `npm run verify:all` runs everything that needs a running app, in one go. Start
 it first with `npm run demo`, or point the suites elsewhere with `BASE=...`.
 
-That is 407 checks. All of them pass on this commit, and CI runs every one
+That is 447 checks. All of them pass on this commit, and CI runs every one
 on every push and pull request.
 
 The unit tests pin the arithmetic: that ₹105 at 5% is ₹100 + ₹2.50 + ₹2.50,

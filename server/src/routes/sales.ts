@@ -7,6 +7,7 @@ import { isInterstateSupply, isValidGstin } from '../lib/gst.js';
 import { roundOff, formatRupees as rupees } from '../lib/money.js';
 import { audit } from '../lib/audit.js';
 import { customerOutstandingPaise } from './customer-ledger.js';
+import { sessionForSale } from './till.js';
 import type { Settings, Product, Batch, Sale, SaleItem } from '../types.js';
 
 export const salesRouter = Router();
@@ -208,15 +209,20 @@ salesRouter.post('/', (req, res) => {
            customer_gstin, doctor_id, prescription_no, patient_name, patient_address,
            place_of_supply, is_interstate, gross_paise, discount_paise, taxable_paise,
            cgst_paise, sgst_paise, igst_paise, round_off_paise, total_paise, paid_paise,
-           payment_mode, payment_ref, notes, served_by, pharmacist_name, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           payment_mode, payment_ref, notes, served_by, pharmacist_name,
+           till_session_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       ).run(
         invoiceNo, ts, d.customer_id, d.customer_name.trim() || 'Cash Customer', d.customer_phone,
         d.customer_gstin.toUpperCase(), d.doctor_id, d.prescription_no, d.patient_name,
         d.patient_address, placeOfSupply, isInterstate ? 1 : 0, gross, discount, taxable,
         cgst, sgst, igst, adjustment, total,
         d.payment_mode === 'CREDIT' ? d.paid_paise : (d.paid_paise || total),
-        d.payment_mode, d.payment_ref, d.notes, user.id, pharmacistName, ts,
+        d.payment_mode, d.payment_ref, d.notes, user.id, pharmacistName,
+        // Attribute the bill to whichever till session is open, opening one if
+        // the shop started trading without opening the till. A customer at the
+        // counter is never made to wait on a formality.
+        sessionForSale(db, user.id), ts,
       );
       const saleId = Number(saleInfo.lastInsertRowid);
 

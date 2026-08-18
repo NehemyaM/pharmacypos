@@ -55,6 +55,12 @@ function migrate(db: Database.Database): void {
   if (!columns('purchases').includes('scan_id')) {
     db.exec("ALTER TABLE purchases ADD COLUMN scan_id TEXT NOT NULL DEFAULT ''");
   }
+  if (!columns('sales').includes('till_session_id')) {
+    db.exec('ALTER TABLE sales ADD COLUMN till_session_id INTEGER REFERENCES till_sessions(id)');
+  }
+  // Indexed here rather than in schema.sql, which runs before this and would be
+  // indexing a column that an upgrading shop does not have yet.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sales_till ON sales(till_session_id)');
 }
 
 /**

@@ -15,6 +15,7 @@ import Contacts from './pages/Contacts';
 import ImportPage from './pages/Import';
 import SettingsPage from './pages/Settings';
 import ScanInvoice from './pages/ScanInvoice';
+import Till from './pages/Till';
 import ExitGuard from './components/ExitGuard';
 import ForcePasswordChange from './components/ForcePasswordChange';
 
@@ -32,6 +33,7 @@ const NAV: NavItem[] = [
   { to: '/contacts', label: 'Contacts', icon: '👥' },
   { to: '/import', label: 'Import', icon: '⭱', roles: ['admin'] },
   { to: '/scan-invoice', label: 'Read invoice', icon: '📷', roles: ['admin', 'pharmacist'] },
+  { to: '/till', label: 'Cash drawer', icon: '💵' },
   { to: '/settings', label: 'Settings', icon: '⚙️', roles: ['admin'] },
 ];
 
@@ -130,6 +132,7 @@ export default function App() {
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/scan-invoice" element={<ScanInvoice />} />
+          <Route path="/till" element={<Till user={user} />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/billing" replace />} />
         </Routes>
