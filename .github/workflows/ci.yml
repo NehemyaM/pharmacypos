@@ -85,6 +85,8 @@ jobs:
         run: node e2e/verify-doctor-and-upload.mjs
       - name: Reading a distributor invoice
         run: node e2e/verify-invoice-scan.mjs
+      - name: Opening and closing the cash drawer
+        run: node e2e/verify-till.mjs
 
       # Every suite photographs what it saw. When one fails, those pictures are
       # the quickest way to understand why.

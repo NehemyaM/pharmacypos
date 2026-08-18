@@ -255,9 +255,15 @@ CREATE TABLE IF NOT EXISTS sales (
   notes            TEXT    NOT NULL DEFAULT '',
   served_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
   pharmacist_name  TEXT    NOT NULL DEFAULT '',
+  -- Which till session was open when this was rung up, so a close can net the
+  -- day's cash without guessing at times.
+  till_session_id  INTEGER REFERENCES till_sessions(id) ON DELETE SET NULL,
   created_at       TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sales_date     ON sales(invoice_date);
+-- The index on till_session_id is created by migrate(), not here. This file
+-- runs before any migration, so on a shop that is upgrading the column does not
+-- exist yet and indexing it would stop the application starting at all.
 CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
 CREATE INDEX IF NOT EXISTS idx_sales_status   ON sales(status);
 
@@ -557,3 +563,58 @@ CREATE TABLE IF NOT EXISTS customer_receipts (
 CREATE INDEX IF NOT EXISTS idx_customer_receipts_customer ON customer_receipts(customer_id);
 CREATE INDEX IF NOT EXISTS idx_customer_receipts_sale     ON customer_receipts(sale_id);
 CREATE INDEX IF NOT EXISTS idx_customer_receipts_date     ON customer_receipts(receipt_date);
+
+-- ---------------------------------------------------------------------------
+-- The cash drawer
+--
+-- A shop opens the till with a float, takes money in and out through the day,
+-- and counts it at close. The difference between what was counted and what the
+-- software expected is the only number that matters here: it is how a shop
+-- finds out that cash is going missing, and it cannot be computed at all
+-- unless the opening float was recorded.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS till_sessions (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  opened_at           TEXT    NOT NULL,
+  opened_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  opening_float_paise INTEGER NOT NULL DEFAULT 0,
+  -- Set when a sale created this session because nobody had opened the till.
+  -- The counter is never blocked for want of a formality, but a close must not
+  -- pretend an unrecorded float was zero.
+  auto_opened         INTEGER NOT NULL DEFAULT 0,
+  closed_at           TEXT,
+  closed_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  -- What was physically counted, and what the software worked out it should be.
+  counted_paise       INTEGER,
+  expected_paise      INTEGER,
+  variance_paise      INTEGER,
+  notes               TEXT    NOT NULL DEFAULT '',
+  status              TEXT    NOT NULL DEFAULT 'OPEN'
+                      CHECK (status IN ('OPEN','CLOSED')),
+  created_at          TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_till_status ON till_sessions(status);
+
+-- Cash in or out that is not a sale: paying a delivery boy, taking the day's
+-- takings to the bank, putting change in.
+CREATE TABLE IF NOT EXISTS till_movements (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id    INTEGER NOT NULL REFERENCES till_sessions(id) ON DELETE CASCADE,
+  kind          TEXT    NOT NULL CHECK (kind IN ('PAY_IN','PAY_OUT')),
+  amount_paise  INTEGER NOT NULL CHECK (amount_paise > 0),
+  reason        TEXT    NOT NULL,
+  by_user       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at            TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_till_moves ON till_movements(session_id);
+
+-- Every time the drawer was sprung without a sale behind it. A till that opens
+-- eleven times on a quiet afternoon is the question a shop owner wants asked.
+CREATE TABLE IF NOT EXISTS drawer_opens (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id  INTEGER REFERENCES till_sessions(id) ON DELETE SET NULL,
+  reason      TEXT    NOT NULL,
+  by_user     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at          TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_drawer_opens_at ON drawer_opens(at);
